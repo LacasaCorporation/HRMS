@@ -1,0 +1,52 @@
+# Delivery status and remaining scope
+
+## Runnable foundation delivered
+
+- Laravel 12, PHP 8.2+, MySQL runtime configuration, Vue 3 + JavaScript + Vite.
+- Session login/logout with CSRF protection, role-aware navigation, seeded company/branch context, and company/branch-filtered server-side access.
+- Persisted people directory and limited employee creation for HR/admin.
+- Persisted attendance check-in/out for linked employees.
+- Persisted leave request, scoped approval/rejection, and balance decrement on approval.
+- Persisted Organization Management foundation: company/branch-scoped departments, parent hierarchy, department leads and cost centers; position planning with headcount and employee assignment; and reporting-line updates with cycle protection.
+- Persisted Recruitment & Hiring foundation: company/branch-scoped requisitions, paginated candidate pipeline with search/stage/role filters, recruiter notes and ratings, pause/close/reopen controls, and offer-to-employee conversion with requisition and position headcount enforcement.
+- Persisted Onboarding & Offboarding foundation: HR/admin-only employee journeys with generated, dated task checklists, notes, progress, overdue tracking, CSV export, and controlled completion. Offboarding deactivates the employee only after every task is complete and HR explicitly confirms.
+- Persisted Attendance workspace: date-range, employee-search, and shift-status reporting; daily activity trend and worked-hour metrics; pagination and filtered CSV export; and personal check-in/out status. The report endpoint preserves the legacy attendance list response.
+- Persisted Shift & Roster foundation: reusable branch-aware shift patterns (including overnight hours), scoped weekly roster assignments, duplicate employee/day protection, approved-leave conflict checks, upcoming assignment removal, pattern archive guards, and CSV export.
+- Persisted Payroll workflow foundation: HR/admin-only company/branch-scoped cycles, explicit employee inclusion, manual currency-specific inputs, arithmetic totals, review/return/approval history, locked submitted inputs, and CSV workpaper export.
+- Company-scoped dashboard aggregates and append-only-by-application audit event recording.
+- Synthetic data only. Demo identities are documented in the root README.
+
+## Staged — not complete and not simulated
+
+The module catalog exposes all 24 approved core modules and 13 advanced modules. Their dedicated pages communicate delivery status and remaining scope; they do not claim that a navigation entry constitutes an implemented workflow.
+
+1. **People and organization:** full employee profile and history, private documents and expiry, position lifecycle beyond planning/assignment, and dashboard drill-downs. Recruitment covers internal requisitions and candidate stages only; job-board publishing, email/calendar, background checks, resume storage, and employee account provisioning remain staged.
+2. **Time and absence:** holiday calendars, automated rotations, weekly-off rules, swap approvals, attendance schedule enforcement, correction/missing-punch approvals, overtime/timesheets, accrual/carry-forward, and expanded employee/manager self-service. Reusable shift patterns and manual weekly roster assignment are implemented.
+3. **Compensation and finance:** approved salary structures and statutory payroll calculations, payroll processing, payslips, loans, benefits, expenses, travel, WPS/SIF generation, and accounting/bank-file contracts. The current payroll foundation stores manually entered workpapers and records review decisions only.
+4. **Growth and employee relations:** performance, training, helpdesk, engagement, discipline, health/safety, assets/uniforms, and secure document workflows.
+5. **Separation, advanced planning, reporting, and integration contracts:** settlement/EOSB, workforce planning/productivity/succession/career, labor-cost allocation, compliance/analytics, and ERP adapters.
+
+All legal calculations (including UAE leave, payroll, gratuity/EOSB, and WPS formats) require customer/legal validation before production. External integrations remain inactive pending authorized credentials, privacy review, and a test environment.
+
+## Known gaps in this increment
+
+- No full permission matrix/policy editor, user provisioning, password reset UI, or MFA.
+- Recruitment data is restricted to HR/admin; candidate consent, retention/erasure workflows, resume storage, interview scheduling, and external sourcing/communications are not implemented. Review applicable privacy requirements before production use.
+- Lifecycle workflows are HR/admin-only and company/branch scoped. Checklist ownership is a team label rather than a user assignment; document upload, account provisioning/revocation, final payroll settlement, and external clearance integrations are not implemented. Closing an offboarding case marks the employee inactive only after all steps are complete and an explicit confirmation is submitted.
+- No complete branch manager hierarchy management; manager data access is restricted to their current employee record and direct reports. Organization writes are limited to HR/admin.
+- Leave weekday counting excludes holidays; requests spanning calendar years are rejected rather than split across annual balances.
+- Attendance has no correction approval, schedule validation, late/early policy, or overtime computation.
+- Shift & Roster is a manual planning workspace. It does not enforce attendance against schedules and has no holiday calendars, weekly-off rules, automated rotations, swap approvals, or overtime calculations.
+- Payroll stores manually entered base pay, other earnings, and manual deductions for each selected employee. Gross/net are arithmetic only; no statutory tax, pension, insurance, overtime, EOSB, payslip, WPS/SIF, payment, or bank/accounting export is implemented. Approval records a review decision and does not mark the cycle as paid. Country rules require customer/legal validation before production use.
+- Attendance reports allow date windows of up to 93 days and paginate up to 500 rows per page; worked hours are calculated only from recorded punch times.
+- Audit events are insert-only through the application service; database-level immutability and audit export controls are not yet configured.
+- The synthetic demo seeder is idempotent and intended for local development only.
+
+## Integration verification
+
+- Organization, recruitment, and lifecycle schema migrations create workflow tables without inserting demo fixtures. The explicitly invoked local demo seeder supplies synthetic recruiting examples.
+- `php artisan test`: **27 passed, 320 assertions**. Tests cover organization, recruitment, lifecycle, attendance reporting, shift/roster authorization and conflict rules, payroll arithmetic, access scope, duplicate periods, and payroll review/return/approval guards.
+- `npm run build`: **passed** with Vite 7.3.6, including the responsive lifecycle, attendance, shift/roster, and Payroll workspaces; `composer validate --no-check-publish`: **valid** from the prior dependency validation.
+- The organization, lifecycle, shift/roster, and payroll migrations are applied to the configured local MySQL database. The legacy department text was normalized; all 6 existing employees are linked to a department, 4 department records exist, and positions are ready to be planned. `php artisan migrate:status` reports every migration as `Ran`.
+- Local browser verification on `127.0.0.1:8000`: signed in with the synthetic HR account, loaded Payroll, verified the empty workspace, and opened the cycle form. Employee inclusion starts empty and must be explicitly selected. No payroll records were created in the browser; cycle creation and review paths are covered by feature tests.
+- This was local-only verification; no Azure resources or external integrations were created or used.

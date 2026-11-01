@@ -1,0 +1,82 @@
+<?php
+
+use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BenefitsController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\LeaveController;
+use App\Http\Controllers\LifecycleController;
+use App\Http\Controllers\ModuleCatalogController;
+use App\Http\Controllers\OrganizationController;
+use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\RecruitmentController;
+use App\Http\Controllers\SeparationController;
+use App\Http\Controllers\ShiftRosterController;
+use Illuminate\Support\Facades\Route;
+
+Route::prefix('api')->group(function () {
+    Route::get('/csrf-token', fn () => response()->json(['csrf_token' => csrf_token()]));
+    Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+
+    Route::middleware('auth')->group(function () {
+        Route::post('/logout', [AuthController::class, 'logout']);
+        Route::get('/me', [AuthController::class, 'me']);
+        Route::get('/modules', ModuleCatalogController::class);
+        Route::get('/dashboard', DashboardController::class);
+        Route::get('/employees', [EmployeeController::class, 'index']);
+        Route::post('/employees', [EmployeeController::class, 'store']);
+        Route::get('/organization', [OrganizationController::class, 'index']);
+        Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
+        Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);
+        Route::post('/organization/positions', [OrganizationController::class, 'storePosition']);
+        Route::post('/organization/positions/{position}/assign', [OrganizationController::class, 'assignPosition']);
+        Route::patch('/organization/employees/{employee}/reporting-line', [OrganizationController::class, 'updateReportingLine']);
+        Route::get('/recruitment', [RecruitmentController::class, 'index']);
+        Route::post('/recruitment/requisitions', [RecruitmentController::class, 'storeRequisition']);
+        Route::patch('/recruitment/requisitions/{requisition}/status', [RecruitmentController::class, 'updateRequisitionStatus']);
+        Route::post('/recruitment/requisitions/{requisition}/candidates', [RecruitmentController::class, 'storeCandidate']);
+        Route::patch('/recruitment/candidates/{candidate}', [RecruitmentController::class, 'updateCandidate']);
+        Route::post('/recruitment/candidates/{candidate}/hire', [RecruitmentController::class, 'hireCandidate']);
+        Route::get('/attendance', [AttendanceController::class, 'index']);
+        Route::get('/attendance/report', [AttendanceController::class, 'report']);
+        Route::post('/attendance/check-in', [AttendanceController::class, 'checkIn']);
+        Route::post('/attendance/{entry}/check-out', [AttendanceController::class, 'checkOut']);
+        Route::get('/leave', [LeaveController::class, 'index']);
+        Route::post('/leave', [LeaveController::class, 'store']);
+        Route::post('/leave/{leaveRequest}/review', [LeaveController::class, 'review']);
+        Route::get('/lifecycle', [LifecycleController::class, 'index']);
+        Route::post('/lifecycle/cases', [LifecycleController::class, 'store']);
+        Route::patch('/lifecycle/tasks/{task}', [LifecycleController::class, 'updateTask']);
+        Route::post('/lifecycle/cases/{case}/complete', [LifecycleController::class, 'complete']);
+        Route::get('/shifts-rosters', [ShiftRosterController::class, 'index']);
+        Route::post('/shifts-rosters/patterns', [ShiftRosterController::class, 'storePattern']);
+        Route::patch('/shifts-rosters/patterns/{pattern}', [ShiftRosterController::class, 'updatePattern']);
+        Route::post('/shifts-rosters/assignments', [ShiftRosterController::class, 'storeAssignment']);
+        Route::delete('/shifts-rosters/assignments/{assignment}', [ShiftRosterController::class, 'destroyAssignment']);
+        Route::get('/payroll', [PayrollController::class, 'index']);
+        Route::post('/payroll/cycles', [PayrollController::class, 'storeCycle']);
+        Route::patch('/payroll/items/{item}', [PayrollController::class, 'updateItem']);
+        Route::post('/payroll/cycles/{cycle}/submit', [PayrollController::class, 'submitCycle']);
+        Route::post('/payroll/cycles/{cycle}/review', [PayrollController::class, 'reviewCycle']);
+        Route::get('/benefits', [BenefitsController::class, 'index']);
+        Route::post('/benefits/plans', [BenefitsController::class, 'storePlan']);
+        Route::patch('/benefits/plans/{plan}', [BenefitsController::class, 'updatePlan']);
+        Route::post('/benefits/enrollments', [BenefitsController::class, 'storeEnrollment']);
+        Route::patch('/benefits/enrollments/{enrollment}', [BenefitsController::class, 'updateEnrollment']);
+        Route::post('/benefits/enrollments/{enrollment}/submit', [BenefitsController::class, 'submitEnrollment']);
+        Route::post('/benefits/enrollments/{enrollment}/review', [BenefitsController::class, 'reviewEnrollment']);
+        Route::post('/benefits/enrollments/{enrollment}/end', [BenefitsController::class, 'endEnrollment']);
+        Route::get('/separations', [SeparationController::class, 'index']);
+        Route::post('/separations/settlements', [SeparationController::class, 'store']);
+        Route::put('/separations/settlements/{settlement}/items', [SeparationController::class, 'updateItems']);
+        Route::post('/separations/settlements/{settlement}/submit', [SeparationController::class, 'submit']);
+        Route::post('/separations/settlements/{settlement}/review', [SeparationController::class, 'review']);
+    });
+});
+
+Route::any('/api/{any?}', fn () => response()->json(['message' => 'Not found.'], 404))
+    ->where('any', '.*');
+
+Route::view('/', 'app');
+Route::view('/{any}', 'app')->where('any', '.*');

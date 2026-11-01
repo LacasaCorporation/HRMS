@@ -1,0 +1,106 @@
+# Northstar People — local HRM foundation
+
+A Laravel 12 + Vue 3 (plain JavaScript) modular monolith for local development. MySQL stores company-scoped people and workflow data; private files use Laravel's local private disk. No cloud resources or external provider connections are configured.
+
+This delivery is an explicitly partial enterprise foundation, not a completed HR suite. The live slices are an authenticated, role-aware shell and module catalog; company-scoped dashboard and employee directory; Organization Management; Recruitment & Hiring (requisitions, candidate pipeline, recruiter notes/ratings, and employee conversion); onboarding/offboarding checklists; attendance reporting with date, employee-search, and shift-status filters, daily worked-hour metrics, paginated register, CSV export and daily check-in/out; Shift & Roster with reusable patterns and a scoped weekly planner; leave requests/review with persisted annual balances; and a restricted Payroll workflow for manually entered workpapers, review/return/approval, and CSV export. Attendance report windows are limited to 93 days, and worked hours use recorded punch times only. Payroll only adds arithmetic totals from manually entered amounts; it does not calculate statutory pay or initiate payments. Other core and advanced modules appear as staged screens and have no fake submit actions. See [docs/DELIVERY-STATUS.md](docs/DELIVERY-STATUS.md).
+
+## Requirements
+
+- PHP 8.2+, Composer 2
+- PHP ZIP extension or an installed `unzip`/`7z` executable for Composer package downloads
+- MySQL 8+ (or a compatible local MySQL server)
+- Node.js and npm already installed (the project does not install or modify Node)
+
+On Windows/XAMPP, if Composer reports that the ZIP extension and unzip/7z are unavailable, enable the bundled `php_zip.dll` extension in the active PHP `php.ini` or run Composer with that extension loaded for the command.
+
+## First run
+
+1. Create a local database, for example `hrm_local` with `utf8mb4` and `utf8mb4_unicode_ci`.
+2. Copy `.env.example` to `.env`; set `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` for your local MySQL.
+3. Install and initialize:
+
+   ```powershell
+   composer install
+   php artisan key:generate
+   php artisan migrate
+   npm install
+   npm run build
+   ```
+
+   Schema migrations do not insert demo rows. To populate this private local demo with the synthetic accounts and records listed below, run `php artisan db:seed` explicitly after migration. Do not use the demo seeder in shared or production environments.
+
+4. Start Laravel in one terminal:
+
+   ```powershell
+   php artisan serve --host=127.0.0.1 --port=8000
+   ```
+
+5. Start Vite in another terminal:
+
+   ```powershell
+   npm run dev
+   ```
+
+Open `http://127.0.0.1:8000`. Vite is used only for local UI development; the built frontend is in `public/build`.
+
+## Synthetic demo accounts
+
+Seeder-created users share the local-only password `password`:
+
+| Role | Email |
+|---|---|
+| HR | `maya.hr@example.test` |
+| Manager | `omar.manager@example.test` |
+| Employee | `lina.employee@example.test` |
+
+These are synthetic local demo identities, not real employee data. Do not reuse the sample password outside a private local environment.
+
+## Checks
+
+```powershell
+php artisan test
+npm run build
+```
+
+Feature tests use an in-memory SQLite database so they do not depend on a running MySQL service. The application runtime and migrations are configured for MySQL.
+
+The API integration test creates its own minimal company, users, and employee records and exercises all API routes, including authentication, validation, authorization, error, and persisted workflow responses. It does not depend on the local demo seeder.
+
+## API and authorization foundation
+
+The browser uses Laravel session authentication and CSRF protection. If a long-lived tab submits an expired token, the API client fetches a fresh session-bound token from `GET /api/csrf-token` and retries the request once. API endpoints are served from `routes/web.php` under `/api`:
+
+- `GET /api/csrf-token`
+- `POST /api/login`, `POST /api/logout`, `GET /api/me`
+- `GET /api/modules`, `GET /api/dashboard`
+- `GET /api/employees?search=…`, `POST /api/employees`
+- `GET /api/organization`
+- `POST /api/organization/departments`, `PATCH /api/organization/departments/{department}`
+- `POST /api/organization/positions`, `POST /api/organization/positions/{position}/assign`
+- `PATCH /api/organization/employees/{employee}/reporting-line`
+- `GET /api/recruitment?search=…&stage=…&requisition_id=…&page=…`
+- `POST /api/recruitment/requisitions`, `PATCH /api/recruitment/requisitions/{requisition}/status`
+- `POST /api/recruitment/requisitions/{requisition}/candidates`
+- `PATCH /api/recruitment/candidates/{candidate}`, `POST /api/recruitment/candidates/{candidate}/hire`
+- `GET /api/lifecycle`, `POST /api/lifecycle/cases`
+- `PATCH /api/lifecycle/tasks/{task}`, `POST /api/lifecycle/cases/{case}/complete`
+- `GET /api/attendance` (recent records), `GET /api/attendance/report?from=…&to=…&search=…&status=…&page=…&per_page=…`
+- `POST /api/attendance/check-in`, `POST /api/attendance/{entry}/check-out`
+- `GET /api/shifts-rosters?from=…&to=…` (31-day maximum, role/branch-scoped assignments, shift patterns, and employee choices)
+- `POST /api/shifts-rosters/patterns`, `PATCH /api/shifts-rosters/patterns/{pattern}`
+- `POST /api/shifts-rosters/assignments`, `DELETE /api/shifts-rosters/assignments/{assignment}`
+- `GET /api/payroll`, `POST /api/payroll/cycles`
+- `PATCH /api/payroll/items/{item}`, `POST /api/payroll/cycles/{cycle}/submit`, `POST /api/payroll/cycles/{cycle}/review`
+- `GET /api/leave`, `POST /api/leave`, `POST /api/leave/{leaveRequest}/review`
+
+Tenant/branch scoping is enforced in `App\Support\PeopleScope` and each domain controller, not only in the Vue navigation. HR/admin can access their company; managers are limited to their own record and direct reports; employees are limited to their own record. Payroll inputs are restricted to HR/admin; identity documents, statutory payroll calculations, UAE legal calculations, and external integrations are not implemented or represented as active.
+
+## Important limitations
+
+- Leave requests count weekdays only and must stay within one calendar year. Holiday calendars, accrual/carry-forward, policy exceptions, and UAE statutory rules remain to be delivered and validated.
+- Attendance is a manual employee check-in/out foundation with scoped reporting and exports. No devices, GPS, biometrics, schedule validation, correction approvals, or automatic overtime calculation are connected.
+- Shift & Roster supports reusable working-hour patterns, overnight shifts, weekly assignment views, CSV export, and HR/admin roster management. A person cannot have duplicate assignments for a day or be scheduled on approved leave. Holiday calendars, automatic rotations, shift swaps, schedule enforcement, overtime, and payroll links are not implemented.
+- Payroll is an HR/admin-only workflow for creating company/branch-scoped, single-currency cycles, selecting active employees, entering base pay/other earnings/manual deductions, recording review or requested changes, and exporting a CSV workpaper. Gross/net are arithmetic only. No statutory tax, pension, insurance, overtime, EOSB, payslip, WPS/SIF, accounting/bank output, payment processing, or employee self-service is implemented. Validate all inputs with approved local guidance; approval is not payment.
+- Employee master data is intentionally minimal. Lifecycle checklists and employee deactivation on completed offboarding are persisted, but private document uploads/access, payroll settlement, account provisioning/revocation, and external clearance integrations are not connected. Recruitment data is HR/admin-only; job-board publishing, email, calendar scheduling, background checks, and resume attachments are not connected.
+- Laravel's local private filesystem is selected; upload flows are not yet exposed.
+- The scaffold seeder creates synthetic local demo fixtures. For non-demo environments, review/remove those fixtures and replace sample credentials before use.
