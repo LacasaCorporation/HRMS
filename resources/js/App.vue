@@ -38,6 +38,22 @@ const expenseReviewId = ref(null);
 const expenseReviewDecision = ref('approve');
 const expenseReviewNote = ref('');
 const expenseReviewError = ref('');
+const loanData = ref({ loans: [], meta: { total: 0, pending: 0, approved: 0, rejected: 0, repaid: 0, truncated: false, can_apply: false } });
+const loanTab = ref('all');
+const loanSearch = ref('');
+const loanStatusFilter = ref('all');
+const loanFormOpen = ref(false);
+const loanForm = ref({ requested_amount: '', requested_installments: 6, purpose: '' });
+const loanFormError = ref('');
+const loanReviewDialog = ref(null);
+const loanReviewOpen = ref(false);
+const loanReviewId = ref(null);
+const loanReviewDecision = ref('approve');
+const loanReviewForm = ref({ approved_amount: '', repayment_installments: 6, first_due_date: '', review_note: '' });
+const loanReviewError = ref('');
+const loanRepaymentInstallmentId = ref(null);
+const loanRepaymentForm = ref({ amount: '', recorded_date: localDateInput(new Date()), reference: '' });
+const loanRepaymentError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -267,7 +283,7 @@ const descriptions = {
     'employee-self-service': 'Your own profile contacts, attendance, and leave in one private workspace.',
     'manager-self-service': 'Direct-report directory, leave approvals, and attendance records.',
     expenses: 'Submit expense claims with receipts, review scoped requests, and keep approval history in one place.',
-    'loans-advances': 'Applications, approvals, repayment schedules, balances, and settlement.',
+    'loans-advances': 'Request an advance, review principal-only repayment schedules, and reconcile repayments recorded outside the app.',
     travel: 'Travel requests, itinerary, allowance rules, expenses, and settlements.',
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
     'health-safety': 'Safety incidents, risk assessments, inspections, PPE, and follow-up actions.',
@@ -301,7 +317,7 @@ const stagedScope = {
     'employee-self-service': 'Employee-owned contacts, leave, and attendance are available. Private documents, letters, and payslips are not exposed.',
     'manager-self-service': 'Direct-report overview, team attendance, and leave decisions are available. Scheduling and other team workflows remain staged.',
     expenses: 'Employee claim submission, private receipt downloads, and direct-report or HR review are available. Approval does not trigger reimbursement or payment.',
-    'loans-advances': 'Loan requests, repayment schedules, payroll deductions, and settlement are staged.',
+    'loans-advances': 'Employee applications, scoped approvals, equal-principal schedules, and HR/admin repayment reconciliation are available. No interest, disbursement, payroll deduction, or collection is initiated.',
     travel: 'Travel requests, policy rules, itineraries, and settlement are staged.',
     disciplinary: 'Restricted case-management workflows are staged.',
     'health-safety': 'Incident, risk, medical fitness, and action-management workflows are staged.',
@@ -378,6 +394,30 @@ const visibleExpenseClaims = computed(() => {
 const expenseApprovedTotals = computed(() => (expenseData.value.meta.approved_amounts || [])
     .map((item) => `${item.currency} ${Number(item.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
     .join(' · ') || '—');
+const canApplyForLoan = computed(() => Boolean(loanData.value.meta.can_apply));
+const loanReviewQueue = computed(() => loanData.value.loans.filter((loan) => loan.can_review));
+const selectedLoanAdvance = computed(() => loanData.value.loans.find((loan) => loan.id === loanReviewId.value) || null);
+const visibleLoanAdvances = computed(() => {
+    const query = loanSearch.value.trim().toLowerCase();
+    return loanData.value.loans.filter((loan) => {
+        const matchesTab = loanTab.value !== 'review' || loan.can_review;
+        const matchesStatus = loanStatusFilter.value === 'all' || loan.status === loanStatusFilter.value;
+        const matchesSearch = !query || [
+            loan.employee_name, loan.employee_code, loan.department, loan.purpose, loan.currency, loan.status,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesTab && matchesStatus && matchesSearch;
+    });
+});
+const loanOutstandingTotals = computed(() => {
+    const totals = new Map();
+    loanData.value.loans.filter((loan) => ['approved', 'repaid'].includes(loan.status)).forEach((loan) => {
+        const currency = loan.currency || '—';
+        totals.set(currency, (totals.get(currency) || 0) + Number(loan.outstanding_amount || 0));
+    });
+    return [...totals.entries()]
+        .map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+        .join(' · ') || '—';
+});
 const selectedManagerRequest = computed(() => managerTeamLeaveRequests.value
     .find((request) => request.id === managerReviewRequestId.value) || null);
 const filteredLifecycleCases = computed(() => {
@@ -592,6 +632,11 @@ watch(expenseReviewOpen, async (open) => {
     await nextTick();
     if (expenseReviewDialog.value && !expenseReviewDialog.value.open) expenseReviewDialog.value.showModal();
 });
+watch(loanReviewOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (loanReviewDialog.value && !loanReviewDialog.value.open) loanReviewDialog.value.showModal();
+});
 watch([() => performanceCycleForm.value.branch_id, performanceCycleEmployees], () => {
     const eligibleIds = new Set(performanceCycleEmployees.value.map((employee) => employee.id));
     performanceCycleForm.value.employee_ids = performanceCycleForm.value.employee_ids.filter((id) => eligibleIds.has(id));
@@ -802,6 +847,7 @@ async function loadActive() {
             };
         }
         if (activeSlug.value === 'expenses') expenseData.value = await api('/expenses');
+        if (activeSlug.value === 'loans-advances') loanData.value = await api('/loans-advances');
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -2838,6 +2884,110 @@ async function submitExpenseReview() {
     }
 }
 
+function formatLoanMoney(amount, currency) {
+    return `${currency || ''} ${Number(amount || 0).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    })}`.trim();
+}
+
+async function submitLoanRequest() {
+    loanFormError.value = '';
+    busy.value = true;
+    try {
+        await api('/loans-advances', { method: 'POST', body: JSON.stringify(loanForm.value) });
+        loanForm.value = { requested_amount: '', requested_installments: 6, purpose: '' };
+        loanFormOpen.value = false;
+        loanTab.value = 'all';
+        message('Loan request submitted for review. No funds or payroll deduction were initiated.');
+        await loadActive();
+    } catch (requestError) {
+        loanFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openLoanReview(loan, decision) {
+    loanReviewId.value = loan.id;
+    loanReviewDecision.value = decision;
+    const firstDueDate = new Date();
+    firstDueDate.setMonth(firstDueDate.getMonth() + 1);
+    loanReviewForm.value = {
+        approved_amount: decision === 'approve' ? loan.requested_amount : '',
+        repayment_installments: loan.requested_installments,
+        first_due_date: localDateInput(firstDueDate),
+        review_note: '',
+    };
+    loanReviewError.value = '';
+    loanReviewOpen.value = true;
+}
+
+function closeLoanReview() {
+    loanReviewOpen.value = false;
+    loanReviewId.value = null;
+    loanReviewError.value = '';
+}
+
+async function submitLoanReview() {
+    if (!selectedLoanAdvance.value) return;
+    loanReviewError.value = '';
+    busy.value = true;
+    try {
+        const body = {
+            decision: loanReviewDecision.value,
+            review_note: loanReviewForm.value.review_note.trim() || null,
+        };
+        if (loanReviewDecision.value === 'approve') {
+            body.approved_amount = loanReviewForm.value.approved_amount;
+            body.repayment_installments = loanReviewForm.value.repayment_installments;
+            body.first_due_date = loanReviewForm.value.first_due_date;
+        }
+        await api(`/loans-advances/${selectedLoanAdvance.value.id}/review`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        loanReviewDialog.value?.close();
+        message(loanReviewDecision.value === 'approve'
+            ? 'Request approved and a proposed repayment schedule recorded. No payment or payroll deduction was made.'
+            : 'Request rejected with a recorded reason.');
+        await loadActive();
+    } catch (requestError) {
+        loanReviewError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openLoanRepayment(installment) {
+    loanRepaymentInstallmentId.value = installment.id;
+    loanRepaymentForm.value = {
+        amount: installment.remaining_amount,
+        recorded_date: localDateInput(new Date()),
+        reference: '',
+    };
+    loanRepaymentError.value = '';
+}
+
+async function submitLoanRepayment(loan) {
+    if (!loanRepaymentInstallmentId.value) return;
+    loanRepaymentError.value = '';
+    busy.value = true;
+    try {
+        await api(`/loans-advances/installments/${loanRepaymentInstallmentId.value}/repayments`, {
+            method: 'POST',
+            body: JSON.stringify(loanRepaymentForm.value),
+        });
+        loanRepaymentInstallmentId.value = null;
+        message('External repayment recorded for reconciliation; no funds were moved by this app.');
+        await loadActive();
+    } catch (requestError) {
+        loanRepaymentError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -4340,6 +4490,71 @@ onUnmounted(() => {
                     <p class="expense-boundary-note"><span>ⓘ</span> Approval records an internal decision only. Payment, reimbursement settlement, tax treatment, and accounting exports are not connected.</p>
                 </template>
 
+                <template v-else-if="activeSlug === 'loans-advances'">
+                    <section class="page-heading loan-heading">
+                        <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> LOANS &amp; ADVANCES</span><h1>Clear requests. Clear repayments.</h1><p>Track applications, approved schedules, and manually reconciled repayments.</p></div>
+                        <button v-if="canApplyForLoan && !loanData.loans.some((loan) => loan.status === 'pending' || loan.status === 'approved')" class="button button-primary" @click="loanFormOpen = !loanFormOpen">{{ loanFormOpen ? 'Close application' : '＋ Request an advance' }}</button>
+                    </section>
+                    <section class="growth-metrics loan-metrics" aria-label="Loan and advance summary">
+                        <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">REQUESTS IN SCOPE</span><b>{{ loanData.meta.total }}</b><small>Visible within your access scope</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">PENDING REVIEW</span><b>{{ loanData.meta.pending }}</b><small>Awaiting an internal decision</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">APPROVED LOANS</span><b>{{ loanData.meta.approved }}</b><small>Approval is not disbursement</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-overdue">¤</span><div><span class="eyebrow">OUTSTANDING SCHEDULES</span><b class="loan-total-value">{{ loanOutstandingTotals }}</b><small>Recorded schedule balance by currency</small></div></article>
+                    </section>
+                    <section class="panel loan-workspace">
+                        <section v-if="loanFormOpen" class="growth-form loan-form">
+                            <div class="growth-form-heading"><div><span class="eyebrow">EMPLOYEE APPLICATION</span><h2>Request a salary advance or loan.</h2><p>Submitting creates an internal request only. Terms, legal eligibility, and funding remain subject to company policy and authorized review.</p></div><button type="button" class="icon-button" aria-label="Close loan application" @click="loanFormOpen = false; loanFormError = ''">×</button></div>
+                            <form class="growth-form-grid" @submit.prevent="submitLoanRequest">
+                                <label>Amount requested ({{ user.employee?.currency || user.company?.currency || 'USD' }})<input v-model="loanForm.requested_amount" type="number" min="0.01" max="9999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00"></label>
+                                <label>Preferred installment count<input v-model="loanForm.requested_installments" type="number" min="1" max="60" step="1" required><small>Preference only; reviewer sets final terms.</small></label>
+                                <label class="growth-field-wide">Purpose<textarea v-model.trim="loanForm.purpose" rows="3" maxlength="2000" required placeholder="Briefly explain the reason for this request"></textarea></label>
+                                <div v-if="loanFormError" class="inline-error growth-field-wide" role="alert">{{ loanFormError }}</div>
+                                <div class="growth-form-footer growth-field-wide"><span>No interest, eligibility, or statutory calculations are inferred. This app does not issue funds or deduct payroll.</span><div><button type="button" class="button button-soft" @click="loanFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Submitting…' : 'Submit request' }}</button></div></div>
+                            </form>
+                        </section>
+                        <div class="loan-toolbar">
+                            <nav class="growth-tabs" aria-label="Loan request views">
+                                <button :class="{ active: loanTab === 'all' }" @click="loanTab = 'all'">All requests <span>{{ loanData.meta.total }}</span></button>
+                                <button v-if="canReviewExpenses" :class="{ active: loanTab === 'review' }" @click="loanTab = 'review'">My review queue <span>{{ loanReviewQueue.length }}</span></button>
+                            </nav>
+                            <div class="loan-filters">
+                                <label><span class="visually-hidden">Filter loan requests by status</span><select v-model="loanStatusFilter"><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="repaid">Repaid</option><option value="rejected">Rejected</option></select></label>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="loanSearch" aria-label="Search loan requests" placeholder="Search employee or purpose"></label>
+                            </div>
+                        </div>
+                        <div v-if="loanData.meta.truncated" class="expense-truncation-note">Showing the latest {{ loanData.meta.limit }} records in your access scope.</div>
+                        <div v-if="visibleLoanAdvances.length" class="loan-list">
+                            <article v-for="loan in visibleLoanAdvances" :key="loan.id" class="loan-card">
+                                <div class="loan-card-header">
+                                    <div class="loan-card-identity"><span class="expense-category-mark">¤</span><div>                                    <div class="loan-card-title"><h2>{{ loan.employee_name }}</h2><span class="self-service-status-pill" :class="loan.repayment_status === 'repaid' ? 'self-service-status-approved' : `self-service-status-${loan.status}`">{{ loan.repayment_status === 'repaid' ? 'repaid' : loan.status.replace('_', ' ') }}</span></div><p>{{ loan.employee_code }}<template v-if="loan.department"> · {{ loan.department }}</template><template v-if="canReviewExpenses"> · Submitted {{ formatDate(loan.created_at) }}</template></p></div></div>
+                                    <div class="loan-card-amount"><b>{{ formatLoanMoney(loan.approved_amount || loan.requested_amount, loan.currency) }}</b><small>{{ loan.status === 'approved' ? `${formatLoanMoney(loan.total_repaid, loan.currency)} repaid · ${formatLoanMoney(loan.outstanding_amount, loan.currency)} outstanding` : `${loan.requested_installments} requested installments` }}</small></div>
+                                </div>
+                                <div class="loan-card-details"><p>{{ loan.purpose }}</p><small v-if="loan.review_note" class="expense-review-note">Review note: {{ loan.review_note }}<template v-if="loan.reviewer?.name"> · {{ loan.reviewer.name }}</template></small></div>
+                                <div v-if="loan.can_review" class="loan-review-actions"><button class="button button-soft" :disabled="busy" @click="openLoanReview(loan, 'reject')">Reject</button><button class="button button-primary" :disabled="busy" @click="openLoanReview(loan, 'approve')">Approve &amp; set schedule</button></div>
+                                <section v-if="loan.status === 'approved' && loan.installments?.length" class="loan-schedule">
+                                    <div class="loan-schedule-heading"><div><span class="eyebrow">PROPOSED REPAYMENT PLAN</span><h3>{{ loan.repayment_installments }} installments <span>·</span> starts {{ formatDate(loan.first_due_date) }}</h3></div><span class="loan-schedule-total">{{ formatLoanMoney(loan.approved_amount, loan.currency) }}</span></div>
+                                    <div class="loan-installment-list">
+                                        <article v-for="installment in loan.installments" :key="installment.id" class="loan-installment">
+                                            <div class="loan-installment-number"><span>{{ String(installment.sequence).padStart(2, '0') }}</span><div><b>{{ formatDate(installment.due_date) }}</b><small>{{ formatLoanMoney(installment.amount, loan.currency) }} scheduled</small></div></div>
+                                            <div class="loan-installment-paid"><span>{{ formatLoanMoney(installment.repaid_amount, loan.currency) }} reconciled</span><b>{{ formatLoanMoney(installment.remaining_amount, loan.currency) }} remaining</b></div>
+                                            <button v-if="loan.can_record_repayment && Number(installment.remaining_amount) > 0" class="button button-soft loan-record-button" :disabled="busy" @click="openLoanRepayment(installment)">{{ loanRepaymentInstallmentId === installment.id ? 'Close' : 'Record external repayment' }}</button>
+                                            <form v-if="loanRepaymentInstallmentId === installment.id" class="loan-repayment-form" @submit.prevent="submitLoanRepayment(loan)">
+                                                <label>Amount reconciled<input v-model="loanRepaymentForm.amount" type="number" min="0.01" :max="installment.remaining_amount" step="0.01" inputmode="decimal" required></label>
+                                                <label>Recorded date<input v-model="loanRepaymentForm.recorded_date" type="date" :max="localDateInput(new Date())" required></label>
+                                                <label>External reference (optional)<input v-model.trim="loanRepaymentForm.reference" maxlength="120" placeholder="Receipt or payroll reference"></label>
+                                                <div v-if="loanRepaymentError" class="inline-error loan-repayment-error" role="alert">{{ loanRepaymentError }}</div>
+                                                <div class="loan-repayment-submit"><span>Reconciliation record only; no payment is processed.</span><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save repayment record' }}</button></div>
+                                            </form>
+                                        </article>
+                                    </div>
+                                </section>
+                            </article>
+                        </div>
+                        <div v-else class="expense-empty-state"><span class="empty-icon">¤</span><b>{{ loanTab === 'review' ? 'Your review queue is clear.' : loanSearch || loanStatusFilter !== 'all' ? 'No requests match these filters.' : 'No loan requests yet.' }}</b><p>{{ loanTab === 'review' ? 'New requests from employees in your review scope will appear here.' : 'Submit a request to begin the review process.' }}</p><button v-if="canApplyForLoan && !loanData.loans.some((loan) => loan.status === 'pending' || loan.status === 'approved') && loanTab === 'all' && !loanFormOpen" class="button button-primary" @click="loanFormOpen = true">Start an application</button><button v-else-if="loanSearch || loanStatusFilter !== 'all'" class="button button-soft" @click="loanSearch = ''; loanStatusFilter = 'all'">Clear filters</button></div>
+                    </section>
+                    <p class="expense-boundary-note"><span>ⓘ</span> Repayment schedules use simple principal-only arithmetic and are not legal or financial advice. Reconciliation logs repayments made outside the app; there is no disbursement, payroll deduction, bank connection, or automated collection.</p>
+                </template>
+
                 <template v-else>
                     <section class="page-heading module-heading"><div><span class="eyebrow">{{ moduleBySlug?.area || 'WORKSPACE' }} <span class="dot-separator">•</span> MODULE OVERVIEW</span><h1>{{ moduleBySlug?.name || 'Workspace module' }}</h1><p>{{ descriptions[activeSlug] || 'A workflow module in the Northstar People roadmap.' }}</p></div><span class="status-pill" :class="moduleBySlug?.delivery === 'Planned' ? 'status-planned' : 'status-foundation'">{{ moduleBySlug?.delivery || 'Planned' }}</span></section>
                     <section class="module-feature-grid"><article class="panel module-status-card"><span class="module-status-icon">✳</span><span class="eyebrow">DELIVERY TRACKER</span><h2>{{ moduleBySlug?.delivery === 'Planned' ? 'Planned — not yet implemented' : 'Foundation slice delivered' }}</h2><p>{{ stagedScope[activeSlug] || 'This module is in the approved enterprise scope. It will be delivered in a later increment with persisted data, authorization, and workflow tests.' }}</p><div class="module-divider"></div><div class="module-meta"><span>DATA STATUS</span><b>{{ moduleBySlug?.delivery === 'Planned' ? 'No workflow data is simulated' : 'Company-scoped foundation' }}</b></div><div class="module-meta"><span>INTEGRATIONS</span><b>Not connected</b></div></article><article class="panel roadmap-list"><span class="eyebrow">NEXT DELIVERY INCREMENTS</span><h2>From foundation to full workflow</h2><div class="roadmap-item"><span class="roadmap-index">01</span><span><b>People & organization</b><small>Profiles, document expiry, recruiting, onboarding, and org structure</small></span><span class="status-pill status-planned">Next</span></div><div class="roadmap-item"><span class="roadmap-index">02</span><span><b>Time & absence</b><small>Roster rules, holidays, corrections, overtime, and leave policies</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">03</span><span><b>Compensation & finance</b><small>Payroll controls, settlement, benefits, loans, expenses, and WPS exports</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">04</span><span><b>Growth, compliance & integrations</b><small>Performance, training, employee relations, advanced planning, and ERP contracts</small></span><span class="status-pill status-planned">Planned</span></div><div class="integration-note"><span>ⓘ</span><p>External providers, banking, biometrics, and ERP connections remain disabled until authorized credentials, privacy review, and a test environment are available.</p></div></article></section>
@@ -4370,6 +4585,23 @@ onUnmounted(() => {
                 <label>{{ expenseReviewDecision === 'approve' ? 'Reviewer note (optional)' : 'Reason for rejection' }}<textarea v-model.trim="expenseReviewNote" rows="3" maxlength="2000" :required="expenseReviewDecision === 'reject'" placeholder="Document the decision for the employee"></textarea></label>
                 <div v-if="expenseReviewError" class="inline-error" role="alert">{{ expenseReviewError }}</div>
                 <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="expenseReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (expenseReviewDecision === 'reject' && !expenseReviewNote.trim())">{{ busy ? 'Saving…' : expenseReviewDecision === 'approve' ? 'Confirm approval' : 'Confirm rejection' }}</button></div>
+            </form>
+        </dialog>
+        <dialog v-if="loanReviewOpen && selectedLoanAdvance" ref="loanReviewDialog" class="recruitment-hire-dialog loan-review-dialog" role="alertdialog" aria-modal="true" aria-labelledby="loan-review-title" @close="closeLoanReview">
+            <form class="recruitment-hire-form" @submit.prevent="submitLoanReview">
+                <span class="recruitment-hire-symbol">{{ loanReviewDecision === 'approve' ? '✓' : '−' }}</span>
+                <span class="eyebrow">LOAN REQUEST DECISION</span>
+                <h2 id="loan-review-title">{{ loanReviewDecision === 'approve' ? 'Approve and set a schedule?' : 'Reject this loan request?' }}</h2>
+                <p>{{ selectedLoanAdvance.employee_name }} requests {{ formatLoanMoney(selectedLoanAdvance.requested_amount, selectedLoanAdvance.currency) }} over {{ selectedLoanAdvance.requested_installments }} preferred installments.</p>
+                <template v-if="loanReviewDecision === 'approve'">
+                    <label>Approved principal<input v-model="loanReviewForm.approved_amount" type="number" min="0.01" :max="selectedLoanAdvance.requested_amount" step="0.01" inputmode="decimal" required></label>
+                    <label>Number of installments<input v-model="loanReviewForm.repayment_installments" type="number" min="1" max="60" step="1" required></label>
+                    <label>First installment due<input v-model="loanReviewForm.first_due_date" type="date" :min="localDateInput(new Date())" required></label>
+                    <p class="loan-review-disclosure">Schedule is equal-principal arithmetic only. It does not create legal terms, interest, a disbursement, or payroll deductions.</p>
+                </template>
+                <label>{{ loanReviewDecision === 'approve' ? 'Reviewer note (optional)' : 'Reason for rejection' }}<textarea v-model.trim="loanReviewForm.review_note" rows="3" maxlength="2000" :required="loanReviewDecision === 'reject'" placeholder="Document the decision for the employee"></textarea></label>
+                <div v-if="loanReviewError" class="inline-error" role="alert">{{ loanReviewError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="loanReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (loanReviewDecision === 'reject' && !loanReviewForm.review_note.trim())">{{ busy ? 'Saving…' : loanReviewDecision === 'approve' ? 'Confirm approval & schedule' : 'Confirm rejection' }}</button></div>
             </form>
         </dialog>
         <dialog v-if="selectedCandidate" ref="hireDialog" class="recruitment-hire-dialog" aria-labelledby="hire-dialog-title" @close="closeHireDialog">

@@ -93,6 +93,10 @@ class ApiEndpointIntegrationTest extends TestCase
             ['POST', '/api/expenses'],
             ['POST', '/api/expenses/1/review'],
             ['GET', '/api/expenses/1/receipt'],
+            ['GET', '/api/loans-advances'],
+            ['POST', '/api/loans-advances'],
+            ['POST', '/api/loans-advances/1/review'],
+            ['POST', '/api/loans-advances/installments/1/repayments'],
             ['GET', '/api/organization'],
             ['POST', '/api/organization/departments'],
             ['PATCH', '/api/organization/departments/1'],
@@ -178,7 +182,8 @@ class ApiEndpointIntegrationTest extends TestCase
             ->assertJsonFragment(['slug' => 'training', 'delivery' => 'Foundation slice'])
             ->assertJsonFragment(['slug' => 'employee-self-service', 'delivery' => 'Foundation slice'])
             ->assertJsonFragment(['slug' => 'manager-self-service', 'delivery' => 'Foundation slice'])
-            ->assertJsonFragment(['slug' => 'expenses', 'delivery' => 'Foundation slice']);
+            ->assertJsonFragment(['slug' => 'expenses', 'delivery' => 'Foundation slice'])
+            ->assertJsonFragment(['slug' => 'loans-advances', 'delivery' => 'Foundation slice']);
         $this->getJson('/api/dashboard')
             ->assertOk()
             ->assertJsonPath('metrics.employees', 2);

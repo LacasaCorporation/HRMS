@@ -47,7 +47,7 @@ return new class extends Migration
         Schema::create('loan_advance_repayments', function (Blueprint $table) {
             $table->id();
             $table->foreignId('loan_advance_installment_id')->constrained('loan_advance_installments')->cascadeOnDelete();
-            $table->foreignId('recorded_by')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('recorded_by')->nullable()->constrained('users')->nullOnDelete();
             $table->decimal('amount', 12, 2);
             $table->date('recorded_date');
             $table->string('reference', 120)->nullable();

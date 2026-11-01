@@ -10,6 +10,7 @@ use App\Http\Controllers\ExpenseClaimController;
 use App\Http\Controllers\GrowthController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LifecycleController;
+use App\Http\Controllers\LoanAdvanceController;
 use App\Http\Controllers\ModuleCatalogController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\PayrollController;
@@ -35,6 +36,10 @@ Route::prefix('api')->group(function () {
         Route::post('/expenses', [ExpenseClaimController::class, 'store']);
         Route::post('/expenses/{claim}/review', [ExpenseClaimController::class, 'review']);
         Route::get('/expenses/{claim}/receipt', [ExpenseClaimController::class, 'receipt']);
+        Route::get('/loans-advances', [LoanAdvanceController::class, 'index']);
+        Route::post('/loans-advances', [LoanAdvanceController::class, 'store']);
+        Route::post('/loans-advances/installments/{installment}/repayments', [LoanAdvanceController::class, 'recordRepayment']);
+        Route::post('/loans-advances/{loan}/review', [LoanAdvanceController::class, 'review']);
         Route::get('/organization', [OrganizationController::class, 'index']);
         Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
         Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);
