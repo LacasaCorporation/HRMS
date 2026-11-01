@@ -351,7 +351,7 @@ const stagedScope = {
     expenses: 'Employee claim submission, private receipt downloads, and direct-report or HR review are available. Approval does not trigger reimbursement or payment.',
     'loans-advances': 'Employee applications, scoped approvals, equal-principal schedules, and HR/admin repayment reconciliation are available. No interest, disbursement, payroll deduction, or collection is initiated.',
     travel: 'Travel requests, manager/HR decisions, itinerary notes, approved budget ceilings, and manual post-trip report reconciliation are available. No booking or reimbursement is initiated.',
-    disciplinary: 'Restricted case-management workflows are staged.',
+    disciplinary: 'Restricted, company/branch-scoped case intake, investigation, employee-response recording, and manual resolution tracking for HR/admin.',
     'health-safety': 'Incident, risk, medical fitness, and action-management workflows are staged.',
     'assets-uniforms': 'Assignments, returns, uniform records, and ERP boundaries are staged.',
     documents: 'Private file access, upload validation, expiry alerts, and retention controls are staged.',

@@ -33,11 +33,25 @@ class DisciplinaryCaseTest extends TestCase
             ->assertJsonPath('case.employee.id', $employee->id)
             ->json('case');
 
+        $this->postJson("/api/disciplinary/cases/{$case['id']}/employee-response", [
+            'employee_response' => 'A response cannot be entered before review begins.',
+        ])->assertStatus(409);
+
         $this->getJson('/api/disciplinary')
             ->assertOk()
             ->assertJsonCount(1, 'cases')
             ->assertJsonPath('meta.open', 1)
             ->assertJsonFragment(['id' => $investigator->id, 'name' => $investigator->name]);
+
+        $otherBranch = Branch::create([
+            'company_id' => $company->id,
+            'name' => 'Other Branch',
+            'code' => 'DISC-OTHER',
+        ]);
+        [$otherBranchInvestigator] = $this->person($company, $otherBranch, 'other-branch@discipline.test', 'hr');
+        $this->postJson("/api/disciplinary/cases/{$case['id']}/start-review", [
+            'investigator_id' => $otherBranchInvestigator->id,
+        ])->assertNotFound();
 
         $this->postJson("/api/disciplinary/cases/{$case['id']}/start-review", [
             'investigator_id' => $investigator->id,
@@ -152,6 +166,34 @@ class DisciplinaryCaseTest extends TestCase
         $this->postJson("/api/disciplinary/cases/{$case->id}/start-review", [
             'investigator_id' => $hr->id,
         ])->assertNotFound();
+
+        $foreignCompany = Company::create([
+            'name' => 'Foreign Disciplinary Company',
+            'code' => 'DISC-F',
+            'country' => 'AE',
+            'currency' => 'AED',
+        ]);
+        $foreignBranch = Branch::create([
+            'company_id' => $foreignCompany->id,
+            'name' => 'Foreign Branch',
+            'code' => 'DISC-F1',
+        ]);
+        [$foreignHr] = $this->person($foreignCompany, $foreignBranch, 'foreign-hr@discipline.test', 'hr');
+        [, $foreignEmployee] = $this->person($foreignCompany, $foreignBranch, 'foreign-employee@discipline.test', 'employee');
+        $foreignCase = DisciplinaryCase::create([
+            'company_id' => $foreignCompany->id,
+            'branch_id' => $foreignBranch->id,
+            'employee_id' => $foreignEmployee->id,
+            'created_by' => $foreignHr->id,
+            'case_type' => 'other',
+            'incident_date' => today()->subDay(),
+            'summary' => 'Foreign company record.',
+            'status' => 'open',
+        ]);
+        $this->getJson('/api/disciplinary')->assertOk()->assertJsonCount(0, 'cases');
+        $this->postJson("/api/disciplinary/cases/{$foreignCase->id}/start-review", [
+            'investigator_id' => $hr->id,
+        ])->assertNotFound();
     }
 
     private function companyAndBranch(): array
@@ -185,7 +227,7 @@ class DisciplinaryCaseTest extends TestCase
             'company_id' => $company->id,
             'branch_id' => $branch->id,
             'user_id' => $user->id,
-            'employee_code' => strtoupper(substr(strtok($email, '@'), 0, 8)),
+            'employee_code' => strtoupper(substr(hash('sha256', $email), 0, 8)),
             'first_name' => $user->name,
             'last_name' => 'Person',
             'department' => 'Operations',
