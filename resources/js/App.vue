@@ -77,7 +77,7 @@ const benefitFormError = ref('');
 const benefitEnrollmentError = ref('');
 const benefitPlanForm = ref({
     name: '', category: 'allowance', currency: 'AED', branch_id: '', provider: '',
-    description: '', eligibility_notes: '',
+    description: '', eligibility_notes: '', status: 'active',
 });
 const benefitEnrollmentForm = ref({
     benefit_plan_id: '', employee_id: '', effective_start: localDateInput(new Date()),
@@ -402,6 +402,16 @@ watch(settlementReviewOpen, async (open) => {
     if (!open) return;
     await nextTick();
     if (settlementReviewDialog.value && !settlementReviewDialog.value.open) settlementReviewDialog.value.showModal();
+});
+watch(benefitEnrollmentEmployees, (employees) => {
+    if (!employees.some((employee) => String(employee.id) === String(benefitEnrollmentForm.value.employee_id))) {
+        benefitEnrollmentForm.value.employee_id = String(employees[0]?.id || '');
+    }
+});
+watch(visibleBenefitEnrollments, (enrollments) => {
+    if (!enrollments.some((enrollment) => enrollment.id === selectedBenefitEnrollmentId.value)) {
+        selectedBenefitEnrollmentId.value = enrollments[0]?.id || null;
+    }
 });
 const recruitmentStages = [
     { id: 'new', label: 'New', icon: '✳' },
@@ -1068,7 +1078,7 @@ function openBenefitPlanForm(plan = null) {
         name: '', category: 'allowance',
         currency: ['AED', 'INR', 'SAR'].includes(user.value?.company?.currency) ? user.value.company.currency : 'AED',
         branch_id: user.value?.branch?.id ? String(user.value.branch.id) : '',
-        provider: '', description: '', eligibility_notes: '',
+        provider: '', description: '', eligibility_notes: '', status: 'active',
     };
     showBenefitPlanForm.value = true;
     benefitsTab.value = 'plans';
@@ -1326,6 +1336,18 @@ function removeSettlementLine(index) {
         [selectedSettlement.value.id]: settlementItemDrafts.value[selectedSettlement.value.id]
             .filter((_, lineIndex) => lineIndex !== index),
     };
+}
+
+function settlementItemsChanged(settlement) {
+    const draft = settlementItemDrafts.value[settlement.id] || [];
+    if (draft.length !== settlement.items.length) return true;
+    return draft.some((line, index) => {
+        const saved = settlement.items[index];
+        return line.category !== saved.category
+            || String(line.description || '') !== String(saved.description || '')
+            || String(line.amount ?? '') !== String(saved.amount ?? '')
+            || String(line.notes || '') !== String(saved.notes || '');
+    });
 }
 
 async function saveSettlementItems() {
@@ -3164,7 +3186,7 @@ onUnmounted(() => {
                                         <span class="benefit-program-icon" :class="`benefit-category-${plan.category}`">{{ plan.category === 'insurance' ? '✚' : plan.category === 'allowance' ? '＋' : plan.category === 'retirement' ? '⌂' : '✳' }}</span>
                                         <div class="benefit-plan-main"><span class="eyebrow">{{ plan.currency }} <span class="dot-separator">•</span> {{ plan.category.toUpperCase() }}</span><h3>{{ plan.name }}</h3><p>{{ plan.description || 'No description added.' }}</p><small>{{ plan.provider || 'Internal program' }} · {{ plan.branch?.name || 'Company-wide' }} · {{ plan.active_enrollment_count }} active or pending</small><p v-if="plan.eligibility_notes" class="benefit-plan-eligibility"><b>Eligibility notes</b> · {{ plan.eligibility_notes }}</p></div>
                                         <span class="status-pill" :class="plan.status === 'active' ? 'benefit-status-active' : 'status-planned'">{{ plan.status }}</span>
-                                        <div class="benefit-plan-actions"><button class="button button-soft" @click="openBenefitPlanForm(plan)">⚙ Configure</button><button v-if="plan.status === 'active'" class="button button-primary" @click="openBenefitEnrollmentForm(); benefitEnrollmentForm.benefit_plan_id = String(plan.id)">＋ Enroll</button></div>
+                                        <div class="benefit-plan-actions"><button v-if="!user.branch_id || plan.branch_id" class="button button-soft" @click="openBenefitPlanForm(plan)">⚙ Configure</button><button v-if="plan.status === 'active'" class="button button-primary" @click="openBenefitEnrollmentForm(); benefitEnrollmentForm.benefit_plan_id = String(plan.id)">＋ Enroll</button></div>
                                     </article>
                                 </div>
                                 <div v-else class="payroll-empty"><span class="empty-icon">✳</span><b>{{ benefitsData.plans.length ? 'No plans match your search' : 'Your first program starts here' }}</b><p>{{ benefitsData.plans.length ? 'Try another provider, category, or plan name.' : 'Create settings for an allowance, insurance, retirement, or wellbeing program.' }}</p><button v-if="!benefitsData.plans.length" class="button button-primary" @click="openBenefitPlanForm()">Create benefit plan</button></div>
@@ -3285,7 +3307,7 @@ onUnmounted(() => {
                                     <span v-if="selectedSettlement.status === 'approved'" class="payroll-approved-note">Approved {{ formatDate(selectedSettlement.reviewed_at) }} · no payment action</span><span v-else-if="selectedSettlement.status === 'in_review'" class="payroll-waiting-note">Workpaper is locked for review.</span><span v-else-if="selectedSettlement.status === 'changes_requested'" class="payroll-returned-note">Update requested lines and resubmit.</span><span v-else class="payroll-draft-note">{{ settlementClearancesComplete(selectedSettlement) ? 'Clearances complete. Verify every line before submission.' : 'Complete all exit checklist tasks before submitting for review.' }}</span>
                                     <div class="settlement-detail-actions">
                                         <button v-if="['draft', 'changes_requested'].includes(selectedSettlement.status)" class="button button-soft" :disabled="busy || !settlementItemDrafts[selectedSettlement.id]?.length" @click="saveSettlementItems">Save workpaper lines</button>
-                                        <button v-if="['draft', 'changes_requested'].includes(selectedSettlement.status)" class="button button-primary" :disabled="busy || !selectedSettlement.items.length || !settlementClearancesComplete(selectedSettlement) || settlementItemDrafts[selectedSettlement.id]?.length !== selectedSettlement.items.length" @click="submitSettlement">Submit for review →</button>
+                                        <button v-if="['draft', 'changes_requested'].includes(selectedSettlement.status)" class="button button-primary" :disabled="busy || !selectedSettlement.items.length || !settlementClearancesComplete(selectedSettlement) || settlementItemsChanged(selectedSettlement)" @click="submitSettlement">Submit for review →</button>
                                         <button v-if="selectedSettlement.status === 'in_review'" class="button button-soft" @click="openSettlementReview('return')">Request changes</button>
                                         <button v-if="selectedSettlement.status === 'in_review'" class="button button-primary" @click="openSettlementReview('approve')">Approve workpaper</button>
                                     </div>
@@ -3330,6 +3352,41 @@ onUnmounted(() => {
                     <button type="button" class="button button-soft" @click="payrollReviewDialog?.close()">Cancel</button>
                     <button type="submit" class="button button-primary" :disabled="busy || (payrollReviewDecision === 'approve' && !payrollReviewAcknowledged) || (payrollReviewDecision === 'return' && !payrollReviewNote.trim())">{{ busy ? 'Saving…' : payrollReviewDecision === 'approve' ? 'Confirm approval' : 'Return cycle' }}</button>
                 </div>
+            </form>
+        </dialog>
+        <dialog v-if="benefitReviewOpen && selectedBenefitEnrollment" ref="benefitReviewDialog" class="recruitment-hire-dialog payroll-review-dialog" aria-labelledby="benefit-review-title" @close="closeBenefitReview">
+            <form class="recruitment-hire-form" @submit.prevent="reviewBenefitEnrollment">
+                <span class="recruitment-hire-symbol">{{ benefitReviewDecision === 'approve' ? '✓' : benefitReviewDecision === 'return' ? '↶' : '−' }}</span>
+                <span class="eyebrow">BENEFIT ENROLLMENT REVIEW</span>
+                <h2 id="benefit-review-title">{{ benefitReviewDecision === 'approve' ? 'Approve this enrollment?' : benefitReviewDecision === 'return' ? 'Request enrollment changes?' : 'Decline this enrollment?' }}</h2>
+                <p>{{ selectedBenefitEnrollment.employee_name }} · {{ selectedBenefitEnrollment.plan?.name }}. This records an HR decision only; no contribution, payroll deduction, provider update, or payment is initiated.</p>
+                <label>{{ benefitReviewDecision === 'approve' ? 'Reviewer note (optional)' : benefitReviewDecision === 'return' ? 'Reason for requested changes' : 'Reason for declining' }}<textarea v-model.trim="benefitReviewNote" rows="3" maxlength="2000" :required="benefitReviewDecision !== 'approve'" placeholder="Document the review decision"></textarea></label>
+                <label v-if="benefitReviewDecision === 'approve'" class="lifecycle-confirm-check"><input v-model="benefitReviewAcknowledged" type="checkbox" required><span>I verified the manually entered amounts and confirm this is an approval record only.</span></label>
+                <div v-if="benefitReviewError" class="inline-error" role="alert">{{ benefitReviewError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="benefitReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (benefitReviewDecision === 'approve' && !benefitReviewAcknowledged) || (benefitReviewDecision !== 'approve' && !benefitReviewNote.trim())">{{ busy ? 'Saving…' : benefitReviewDecision === 'approve' ? 'Confirm approval' : benefitReviewDecision === 'return' ? 'Request changes' : 'Decline enrollment' }}</button></div>
+            </form>
+        </dialog>
+        <dialog v-if="benefitEndOpen && selectedBenefitEnrollment" ref="benefitEndDialog" class="recruitment-hire-dialog payroll-review-dialog" aria-labelledby="benefit-end-title" @close="benefitEndOpen = false; benefitEndError = ''">
+            <form class="recruitment-hire-form" @submit.prevent="endBenefitEnrollment">
+                <span class="recruitment-hire-symbol">↗</span>
+                <span class="eyebrow">END BENEFIT ENROLLMENT</span>
+                <h2 id="benefit-end-title">Record an end date?</h2>
+                <p>This ends the internal enrollment record for {{ selectedBenefitEnrollment.employee_name }}. It does not notify the employee, update a provider, or stop payroll deductions.</p>
+                <label>Effective end date<input v-model="benefitEndDate" type="date" :min="selectedBenefitEnrollment.effective_start" required></label>
+                <div v-if="benefitEndError" class="inline-error" role="alert">{{ benefitEndError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="benefitEndDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Confirm end date' }}</button></div>
+            </form>
+        </dialog>
+        <dialog v-if="settlementReviewOpen && selectedSettlement" ref="settlementReviewDialog" class="recruitment-hire-dialog payroll-review-dialog" aria-labelledby="settlement-review-title" @close="settlementReviewOpen = false; settlementReviewAcknowledged = false">
+            <form class="recruitment-hire-form" @submit.prevent="reviewSettlement">
+                <span class="recruitment-hire-symbol">{{ settlementReviewDecision === 'approve' ? '✓' : '↶' }}</span>
+                <span class="eyebrow">SETTLEMENT WORKPAPER REVIEW</span>
+                <h2 id="settlement-review-title">{{ settlementReviewDecision === 'approve' ? 'Approve this workpaper?' : 'Request workpaper changes?' }}</h2>
+                <p>{{ selectedSettlement.employee_name }} · {{ selectedSettlement.currency }}. The total is arithmetic only. Approval records a reviewer decision and does not create a payment or payroll instruction.</p>
+                <label>{{ settlementReviewDecision === 'approve' ? 'Reviewer note (optional)' : 'Reason for requested changes' }}<textarea v-model.trim="settlementReviewNote" rows="3" maxlength="2000" :required="settlementReviewDecision === 'return'" placeholder="Document the review decision"></textarea></label>
+                <label v-if="settlementReviewDecision === 'approve'" class="lifecycle-confirm-check"><input v-model="settlementReviewAcknowledged" type="checkbox" required><span>I reviewed all saved workpaper lines and confirm this is approval only, not payment.</span></label>
+                <div v-if="settlementReviewError" class="inline-error" role="alert">{{ settlementReviewError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="settlementReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (settlementReviewDecision === 'approve' && !settlementReviewAcknowledged) || (settlementReviewDecision === 'return' && !settlementReviewNote.trim())">{{ busy ? 'Saving…' : settlementReviewDecision === 'approve' ? 'Confirm approval' : 'Request changes' }}</button></div>
             </form>
         </dialog>
         <dialog v-if="lifecycleCloseOpen && selectedLifecycleCase" ref="lifecycleCloseDialog" class="recruitment-hire-dialog" aria-labelledby="lifecycle-close-title" @close="lifecycleCloseOpen = false; lifecycleCloseAcknowledged = false">
