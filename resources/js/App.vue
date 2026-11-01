@@ -20,6 +20,14 @@ const attendanceSearch = ref('');
 const attendanceStatusFilter = ref('all');
 const attendanceExporting = ref(false);
 const leaveData = ref({ requests: [], balances: [], types: [] });
+const selfServiceData = ref({
+    employee: null, balances: [], leave_requests: [], leave_types: [], attendance: [], today_attendance: null,
+});
+const selfServiceTab = ref('overview');
+const selfServiceProfileForm = ref({ work_email: '', phone: '' });
+const selfServiceProfileError = ref('');
+const selfServiceLeaveError = ref('');
+const selfServiceAttendanceError = ref('');
 const organization = ref({ company: null, branches: [], departments: [], positions: [], employees: [], metrics: {} });
 const recruitment = ref({
     requisitions: [], candidates: [], departments: [], positions: [], pipeline: {}, metrics: {},
@@ -233,7 +241,7 @@ const descriptions = {
     benefits: 'Manage program metadata, manually record benefit enrollment amounts, and document HR review decisions.',
     performance: 'Goals, reviews, feedback, and documented performance plans.',
     training: 'Training needs, programs, attendance, credentials, and career development.',
-    'employee-self-service': 'Employee-owned profile, requests, documents, letters, and payroll views.',
+    'employee-self-service': 'Your own profile contacts, attendance, and leave in one private workspace.',
     'manager-self-service': 'Team directory, approvals, schedules, and manager requests.',
     expenses: 'Expense claims, receipt handling, approval, and reimbursement tracking.',
     'loans-advances': 'Applications, approvals, repayment schedules, balances, and settlement.',
@@ -267,7 +275,7 @@ const stagedScope = {
     benefits: 'Benefit plan settings, employee enrollment, and documented review decisions are persisted. Contribution amounts are manually entered.',
     performance: 'Evaluation cycles, goals, 360 feedback, and recommendations are staged.',
     training: 'Programs, provider records, attendance, certifications, and career plans are staged.',
-    'employee-self-service': 'Self-service navigation is available; profile changes, private documents, and letters are staged.',
+    'employee-self-service': 'Employee-owned contacts, leave, and attendance are available. Private documents, letters, and payslips are not exposed.',
     'manager-self-service': 'Team-scoped leave review is available. Additional team approvals, requisitions, and scheduling are staged.',
     expenses: 'Claim submission, receipt storage, approvals, and reimbursement are staged.',
     'loans-advances': 'Loan requests, repayment schedules, payroll deductions, and settlement are staged.',
@@ -297,6 +305,19 @@ const stagedScope = {
 const moduleBySlug = computed(() => modules.value.find((module) => module.slug === activeSlug.value));
 const isApprover = computed(() => ['admin', 'hr', 'manager'].includes(user.value?.role));
 const canManageOrganization = computed(() => ['admin', 'hr'].includes(user.value?.role));
+const selfServiceEmployee = computed(() => selfServiceData.value.employee);
+const selfServicePendingLeaveCount = computed(() => selfServiceData.value.leave_requests
+    .filter((request) => request.status === 'pending').length);
+const selfServiceAvailableLeaveDays = computed(() => selfServiceData.value.balances
+    .reduce((total, balance) => total + Math.max(0, Number(balance.entitled_days) - Number(balance.used_days)), 0));
+const selfServiceProfileChanged = computed(() => Boolean(selfServiceEmployee.value)
+    && (String(selfServiceProfileForm.value.work_email || '') !== String(selfServiceEmployee.value.work_email || '')
+        || String(selfServiceProfileForm.value.phone || '') !== String(selfServiceEmployee.value.phone || '')));
+const selfServiceContactComplete = computed(() => [selfServiceEmployee.value?.work_email, selfServiceEmployee.value?.phone]
+    .filter((value) => String(value || '').trim()).length);
+const selfServiceUpcomingLeave = computed(() => selfServiceData.value.leave_requests
+    .filter((request) => request.status === 'approved' && request.start_date >= localDateInput(new Date()))
+    .sort((left, right) => left.start_date.localeCompare(right.start_date))[0] || null);
 const filteredLifecycleCases = computed(() => {
     const query = lifecycleSearch.value.trim().toLowerCase();
     return lifecycle.value.cases.filter((caseItem) => {
@@ -597,7 +618,9 @@ const filteredEmployees = computed(() => {
             .some((value) => String(value || '').toLowerCase().includes(query)));
 });
 const employeeAttendance = computed(() => {
-    return attendanceToday.value;
+    return activeSlug.value === 'employee-self-service'
+        ? selfServiceData.value.today_attendance
+        : attendanceToday.value;
 });
 const groupedModules = computed(() => {
     const visible = modules.value.filter((module) => {
@@ -680,6 +703,16 @@ async function loadActive() {
             employees.value = result.data;
         }
         if (activeSlug.value === 'attendance') await loadAttendanceReport();
+        if (activeSlug.value === 'employee-self-service') {
+            selfServiceData.value = await api('/self-service');
+            selfServiceProfileForm.value = {
+                work_email: selfServiceData.value.employee?.work_email || '',
+                phone: selfServiceData.value.employee?.phone || '',
+            };
+            if (!selfServiceData.value.leave_types.some((type) => String(type.id) === String(leaveForm.value.leave_type_id))) {
+                leaveForm.value.leave_type_id = selfServiceData.value.leave_types[0]?.id || '';
+            }
+        }
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -2564,6 +2597,38 @@ async function createLeaveRequest() {
     }
 }
 
+async function submitSelfServiceLeaveRequest() {
+    selfServiceLeaveError.value = '';
+    busy.value = true;
+    try {
+        await api('/leave', { method: 'POST', body: JSON.stringify(leaveForm.value) });
+        leaveForm.value = { leave_type_id: selfServiceData.value.leave_types[0]?.id || '', start_date: '', end_date: '', reason: '' };
+        message('Your leave request is submitted for review.');
+        await loadActive();
+    } catch (requestError) {
+        selfServiceLeaveError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function saveSelfServiceProfile() {
+    selfServiceProfileError.value = '';
+    busy.value = true;
+    try {
+        const result = await api('/self-service/profile', {
+            method: 'PATCH',
+            body: JSON.stringify(selfServiceProfileForm.value),
+        });
+        selfServiceData.value.employee = result.employee;
+        message('Your contact details were updated.');
+    } catch (requestError) {
+        selfServiceProfileError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function reviewLeave(request, decision) {
     const verb = decision === 'approved' ? 'approve' : 'decline';
     if (!window.confirm(`${verb[0].toUpperCase()}${verb.slice(1)} this leave request?`)) return;
@@ -2584,6 +2649,7 @@ async function reviewLeave(request, decision) {
 }
 
 async function attendanceAction() {
+    selfServiceAttendanceError.value = '';
     busy.value = true;
     try {
         if (employeeAttendance.value?.check_in && !employeeAttendance.value?.check_out) {
@@ -2593,9 +2659,11 @@ async function attendanceAction() {
             await api('/attendance/check-in', { method: 'POST', body: '{}' });
             message('Check-in recorded.');
         }
-        await loadAttendanceReport();
+        if (activeSlug.value === 'employee-self-service') await loadActive();
+        else await loadAttendanceReport();
     } catch (requestError) {
-        message(requestError.message, true);
+        if (activeSlug.value === 'employee-self-service') selfServiceAttendanceError.value = requestError.message;
+        else message(requestError.message, true);
     } finally {
         busy.value = false;
     }
@@ -3041,6 +3109,8 @@ onUnmounted(() => {
                             <div v-if="!filteredPositions.length" class="empty-state panel organization-empty-positions"><span class="empty-icon">⌕</span><b>No positions match your search</b><p>Try a different title, department, or position code.</p></div>
                         </section>
                     </template>
+
+
                     <template v-else>
                         <section class="panel reporting-panel">
                             <div class="reporting-panel-heading"><div><span class="eyebrow">LIVE COMPANY HIERARCHY</span><h2>People, connected to their teams.</h2><p>Update a reporting line and the saved org chart refreshes from the employee register.</p></div><span class="reporting-count">{{ organizationTreeRows.length }}<small>people</small></span></div>
@@ -3862,6 +3932,99 @@ onUnmounted(() => {
                         <div class="growth-boundary-note"><span>ⓘ</span><p>Training assignments and completion dates are manually recorded. Course delivery, attendance, credentials, accreditation, and provider integrations are not automated.</p><span>HR &amp; admin only</span></div>
                     </template>
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">▣</span><b>Training records are restricted</b><p>Program settings, employee assignments, and completion records are available to HR and administrators only.</p></section>
+                </template>
+
+                <template v-else-if="activeSlug === 'employee-self-service'">
+                    <section v-if="selfServiceEmployee" class="page-heading self-service-heading">
+                        <div>
+                            <span class="eyebrow">MY WORKSPACE <span class="dot-separator">•</span> EMPLOYEE SELF-SERVICE</span>
+                            <h1>Welcome back, {{ selfServiceEmployee.first_name }}.</h1>
+                            <p>Your profile, time, and leave information in one private place.</p>
+                        </div>
+                        <div class="self-service-heading-actions">
+                            <span class="self-service-date">{{ new Date().toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }) }}</span>
+                            <button class="button button-primary self-service-punch" :disabled="busy || selfServiceEmployee.status !== 'active' || Boolean(employeeAttendance?.check_out)" @click="attendanceAction">
+                                {{ employeeAttendance?.check_out ? 'Shift complete' : employeeAttendance?.check_in ? 'Check out' : 'Check in' }}
+                                <span aria-hidden="true">{{ employeeAttendance?.check_in && !employeeAttendance?.check_out ? '↗' : '→' }}</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    <section v-if="!selfServiceEmployee" class="panel self-service-unlinked" role="status">
+                        <span class="self-service-empty-icon">◎</span>
+                        <div><span class="eyebrow">EMPLOYEE ACCOUNT LINK NEEDED</span><h2>Your employee profile is not linked yet.</h2><p>Ask your HR administrator to link your sign-in to an active employee record. No other employee information is shown here.</p></div>
+                    </section>
+
+                    <template v-else>
+                        <nav class="self-service-tabs" aria-label="Employee self-service sections">
+                            <button :class="{ active: selfServiceTab === 'overview' }" @click="selfServiceTab = 'overview'">Overview</button>
+                            <button :class="{ active: selfServiceTab === 'profile' }" @click="selfServiceTab = 'profile'">My profile</button>
+                            <button :class="{ active: selfServiceTab === 'leave' }" @click="selfServiceTab = 'leave'">Leave <span>{{ selfServicePendingLeaveCount }}</span></button>
+                            <button :class="{ active: selfServiceTab === 'attendance' }" @click="selfServiceTab = 'attendance'">Attendance</button>
+                        </nav>
+
+                        <template v-if="selfServiceTab === 'overview'">
+                            <section class="self-service-metrics" aria-label="Personal overview">
+                                <article class="self-service-metric"><span class="self-service-metric-icon">◷</span><div><span class="eyebrow">LAST 30 DAYS</span><b>{{ selfServiceData.attendance.length }}</b><small>recorded days</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">▤</span><div><span class="eyebrow">LEAVE AVAILABLE</span><b>{{ selfServiceAvailableLeaveDays.toLocaleString() }}</b><small>days across balances</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">↗</span><div><span class="eyebrow">REQUESTS IN REVIEW</span><b>{{ selfServicePendingLeaveCount }}</b><small>awaiting a decision</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">◎</span><div><span class="eyebrow">PROFILE DETAILS</span><b>{{ selfServiceContactComplete }}/2</b><small>contact fields provided</small></div></article>
+                            </section>
+
+                            <section class="self-service-overview-grid">
+                                <article class="panel self-service-panel self-service-profile-card">
+                                    <div class="self-service-panel-heading"><div><span class="eyebrow">YOUR PROFILE</span><h2>{{ fullName(selfServiceEmployee) }}</h2><p>{{ selfServiceEmployee.job_title || 'Role not set' }} <span>·</span> {{ selfServiceEmployee.department || 'Department not set' }}</p></div><span class="avatar self-service-avatar">{{ initials(selfServiceEmployee) }}</span></div>
+                                    <div class="self-service-profile-details">
+                                        <div><small>Employee ID</small><b>{{ selfServiceEmployee.employee_code || '—' }}</b></div>
+                                        <div><small>Work email</small><b>{{ selfServiceEmployee.work_email || 'Not provided' }}</b></div>
+                                        <div><small>Phone</small><b>{{ selfServiceEmployee.phone || 'Not provided' }}</b></div>
+                                        <div><small>Manager</small><b>{{ selfServiceEmployee.manager?.name || 'Not assigned' }}</b></div>
+                                        <div><small>Location</small><b>{{ selfServiceEmployee.branch?.name || 'Not assigned' }}</b></div>
+                                        <div><small>Start date</small><b>{{ formatDate(selfServiceEmployee.join_date) }}</b></div>
+                                    </div>
+                                    <button class="text-link self-service-edit-link" @click="selfServiceTab = 'profile'">Review contact details →</button>
+                                </article>
+
+                                <article class="panel self-service-panel self-service-attendance-card">
+                                    <div class="self-service-panel-heading"><div><span class="eyebrow">TODAY</span><h2>{{ employeeAttendance?.check_out ? 'Your shift is complete' : employeeAttendance?.check_in ? 'You are checked in' : 'Ready when you are' }}</h2><p>{{ employeeAttendance?.check_in ? `${formatTime(employeeAttendance.check_in)}${employeeAttendance.check_out ? ` – ${formatTime(employeeAttendance.check_out)}` : ' · Check out when you finish'}` : 'Record your attendance for today.' }}</p></div><span class="self-service-status-dot" :class="{ checked: employeeAttendance?.check_in }"></span></div>
+                                    <button class="button button-primary button-wide" :disabled="busy || selfServiceEmployee.status !== 'active' || Boolean(employeeAttendance?.check_out)" @click="attendanceAction">{{ employeeAttendance?.check_out ? 'Attendance complete' : employeeAttendance?.check_in ? 'Check out' : 'Check in' }} <span aria-hidden="true">→</span></button>
+                                    <div v-if="selfServiceAttendanceError" class="inline-error" role="alert">{{ selfServiceAttendanceError }}</div>
+                                    <div v-if="selfServiceUpcomingLeave" class="self-service-next-leave"><span>UP NEXT</span><b>{{ selfServiceUpcomingLeave.leave_type?.name }} · {{ formatDate(selfServiceUpcomingLeave.start_date) }}</b><small>Approved leave</small></div>
+                                    <div v-else class="self-service-next-leave self-service-next-leave-empty"><span>LEAVE PLANNER</span><b>No approved leave coming up</b><button class="text-link" @click="selfServiceTab = 'leave'">View balances or request leave →</button></div>
+                                </article>
+                            </section>
+
+                            <section class="self-service-overview-grid self-service-lower-grid">
+                                <article class="panel self-service-panel">
+                                    <div class="self-service-section-title"><div><span class="eyebrow">LEAVE BALANCES</span><h2>Time away, at a glance.</h2></div><button class="text-link" @click="selfServiceTab = 'leave'">View leave →</button></div>
+                                    <div v-if="selfServiceData.balances.length" class="self-service-balance-list">
+                                        <div v-for="balance in selfServiceData.balances" :key="balance.id" class="self-service-balance-row"><span><b>{{ balance.leave_type?.name || 'Leave' }}</b><small>{{ Number(balance.used_days).toLocaleString() }} of {{ Number(balance.entitled_days).toLocaleString() }} days used</small></span><b>{{ Math.max(0, Number(balance.entitled_days) - Number(balance.used_days)).toLocaleString() }} <small>days left</small></b><span class="self-service-balance-track"><i :style="{ width: `${Math.min(100, Number(balance.entitled_days) > 0 ? (Number(balance.used_days) / Number(balance.entitled_days)) * 100 : 0)}%` }"></i></span></div>
+                                    </div>
+                                    <div v-else class="self-service-empty-inline"><b>No leave balance has been set up.</b><p>HR can configure your annual leave entitlements.</p></div>
+                                </article>
+                                <article class="panel self-service-panel">
+                                    <div class="self-service-section-title"><div><span class="eyebrow">RECENT ACTIVITY</span><h2>Your latest attendance.</h2></div><button class="text-link" @click="selfServiceTab = 'attendance'">View history →</button></div>
+                                    <div v-if="selfServiceData.attendance.length" class="self-service-activity-list"><div v-for="entry in selfServiceData.attendance.slice(0, 4)" :key="entry.id"><span class="self-service-activity-date">{{ formatDate(entry.attendance_date) }}</span><span><b>{{ formatTime(entry.check_in) }} – {{ formatTime(entry.check_out) }}</b><small>{{ entry.status || (entry.check_out ? 'Complete' : 'In progress') }}</small></span><span class="self-service-activity-mark">{{ entry.check_out ? '✓' : '·' }}</span></div></div>
+                                    <div v-else class="self-service-empty-inline"><b>No attendance entries yet.</b><p>Your check-ins and check-outs will appear here.</p><button class="text-link" @click="attendanceAction">Record today’s check-in →</button></div>
+                                </article>
+                            </section>
+
+                            <aside class="self-service-boundary-note"><span aria-hidden="true">ⓘ</span><p>Only your own profile, leave, and attendance are shown. Payslips, letters, and private documents will appear here when their secure workflows are available.</p></aside>
+                        </template>
+
+                        <section v-else-if="selfServiceTab === 'profile'" class="self-service-detail-grid">
+                            <article class="panel self-service-panel self-service-identity-card"><span class="avatar self-service-avatar">{{ initials(selfServiceEmployee) }}</span><span class="eyebrow">EMPLOYEE PROFILE</span><h2>{{ fullName(selfServiceEmployee) }}</h2><p>{{ selfServiceEmployee.job_title || 'Role not set' }}</p><span class="self-service-employee-code">{{ selfServiceEmployee.employee_code || 'Employee ID unavailable' }}</span><div class="self-service-identity-divider"></div><div><small>Department</small><b>{{ selfServiceEmployee.department || 'Not assigned' }}</b></div><div><small>Branch</small><b>{{ selfServiceEmployee.branch?.name || 'Not assigned' }}</b></div><div><small>Reports to</small><b>{{ selfServiceEmployee.manager?.name || 'Not assigned' }}</b></div><div><small>Employment type</small><b>{{ selfServiceEmployee.employment_type || 'Not set' }}</b></div></article>
+                            <article class="panel self-service-panel self-service-contact-panel"><div class="self-service-section-title"><div><span class="eyebrow">CONTACT INFORMATION</span><h2>Keep your details current.</h2><p>Only work email and phone can be edited here. Contact HR to change other employment records.</p></div></div><form class="self-service-contact-form" @submit.prevent="saveSelfServiceProfile"><label>Work email<input v-model.trim="selfServiceProfileForm.work_email" type="email" maxlength="190" autocomplete="email" placeholder="name@company.com"></label><label>Phone number<input v-model.trim="selfServiceProfileForm.phone" type="tel" maxlength="40" autocomplete="tel" placeholder="+971 50 000 0000"></label><div v-if="selfServiceProfileError" class="inline-error" role="alert">{{ selfServiceProfileError }}</div><div class="self-service-form-footer"><span>Changes update your employee contact record.</span><button class="button button-primary" type="submit" :disabled="busy || !selfServiceProfileChanged">{{ busy ? 'Saving…' : 'Save contact details' }}</button></div></form></article>
+                        </section>
+
+                        <section v-else-if="selfServiceTab === 'leave'" class="self-service-leave-grid">
+                            <article class="panel self-service-panel"><div class="self-service-section-title"><div><span class="eyebrow">YOUR ENTITLEMENTS</span><h2>Leave balances</h2><p>Current-year entitlement and recorded usage.</p></div></div><div v-if="selfServiceData.balances.length" class="self-service-balance-list self-service-balance-list-large"><div v-for="balance in selfServiceData.balances" :key="balance.id" class="self-service-balance-row"><span><b>{{ balance.leave_type?.name || 'Leave' }}</b><small>{{ Number(balance.used_days).toLocaleString() }} of {{ Number(balance.entitled_days).toLocaleString() }} days used</small></span><b>{{ Math.max(0, Number(balance.entitled_days) - Number(balance.used_days)).toLocaleString() }} <small>days left</small></b><span class="self-service-balance-track"><i :style="{ width: `${Math.min(100, Number(balance.entitled_days) > 0 ? (Number(balance.used_days) / Number(balance.entitled_days)) * 100 : 0)}%` }"></i></span></div></div><div v-else class="self-service-empty-inline"><b>No balances are available yet.</b><p>Contact HR if you believe an entitlement should be visible.</p></div></article>
+                            <article class="panel self-service-panel"><div class="self-service-section-title"><div><span class="eyebrow">NEW REQUEST</span><h2>Plan time away.</h2><p>Requests are sent to your configured approver for review.</p></div></div><form class="self-service-leave-form" @submit.prevent="submitSelfServiceLeaveRequest"><label>Leave type<select v-model="leaveForm.leave_type_id" required><option value="" disabled>Select leave type</option><option v-for="type in selfServiceData.leave_types" :key="type.id" :value="String(type.id)">{{ type.name }}{{ type.is_paid ? ' · Paid' : ' · Unpaid' }}</option></select></label><div class="self-service-date-fields"><label>First day<input v-model="leaveForm.start_date" type="date" :min="localDateInput(new Date())" required></label><label>Last day<input v-model="leaveForm.end_date" type="date" :min="leaveForm.start_date || localDateInput(new Date())" required></label></div><label>Reason for request<textarea v-model.trim="leaveForm.reason" rows="3" maxlength="2000" required placeholder="Add context for your approver"></textarea></label><div v-if="selfServiceLeaveError" class="inline-error" role="alert">{{ selfServiceLeaveError }}</div><button class="button button-primary" type="submit" :disabled="busy || !selfServiceData.leave_types.length">{{ busy ? 'Submitting…' : 'Submit leave request' }} <span aria-hidden="true">→</span></button></form></article>
+                            <article class="panel self-service-panel self-service-request-panel"><div class="self-service-section-title"><div><span class="eyebrow">REQUEST HISTORY</span><h2>Your leave requests.</h2><p>Latest 20 requests and their current decisions.</p></div><span class="self-service-request-count">{{ selfServiceData.leave_requests.length }}</span></div><div v-if="selfServiceData.leave_requests.length" class="self-service-request-list"><article v-for="request in selfServiceData.leave_requests" :key="request.id"><span class="self-service-request-icon">▤</span><span class="self-service-request-main"><b>{{ request.leave_type?.name || 'Leave' }}</b><small>{{ formatDate(request.start_date) }} – {{ formatDate(request.end_date) }} <span>·</span> {{ Number(request.requested_days).toLocaleString() }} days</small><small v-if="request.reason" class="self-service-request-reason">{{ request.reason }}</small></span><span class="self-service-status-pill" :class="`self-service-status-${request.status}`">{{ request.status.replace('_', ' ') }}</span></article></div><div v-else class="self-service-empty-inline"><b>No leave requests yet.</b><p>Your submitted requests will be listed here.</p></div></article>
+                        </section>
+
+                        <section v-else class="panel self-service-panel self-service-attendance-history"><div class="self-service-section-title"><div><span class="eyebrow">PERSONAL TIME RECORD</span><h2>Attendance history</h2><p>Your latest 30 attendance entries. For corrections, contact your manager or HR.</p></div><button class="button button-soft" :disabled="busy || selfServiceEmployee.status !== 'active' || Boolean(employeeAttendance?.check_out)" @click="attendanceAction">{{ employeeAttendance?.check_out ? 'Shift complete' : employeeAttendance?.check_in ? 'Check out' : 'Check in' }}</button></div><div v-if="selfServiceAttendanceError" class="inline-error self-service-attendance-error" role="alert">{{ selfServiceAttendanceError }}</div><div v-if="selfServiceData.attendance.length" class="self-service-attendance-table-wrap"><table class="self-service-attendance-table"><thead><tr><th>Date</th><th>Check in</th><th>Check out</th><th>Status</th></tr></thead><tbody><tr v-for="entry in selfServiceData.attendance" :key="entry.id"><td>{{ formatDate(entry.attendance_date) }}</td><td>{{ formatTime(entry.check_in) }}</td><td>{{ formatTime(entry.check_out) }}</td><td><span class="self-service-status-pill" :class="entry.check_out ? 'self-service-status-approved' : 'self-service-status-pending'">{{ entry.status || (entry.check_out ? 'Complete' : 'In progress') }}</span></td></tr></tbody></table></div><div v-else class="self-service-empty-inline"><b>No attendance recorded yet.</b><p>Your personal punches will appear here after you check in.</p><button class="button button-primary" :disabled="busy || selfServiceEmployee.status !== 'active'" @click="attendanceAction">Record today’s check-in</button></div></section>
+                    </template>
                 </template>
 
                 <template v-else>

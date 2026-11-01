@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BenefitsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\EmployeeSelfServiceController;
 use App\Http\Controllers\GrowthController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LifecycleController;
@@ -27,6 +28,8 @@ Route::prefix('api')->group(function () {
         Route::get('/dashboard', DashboardController::class);
         Route::get('/employees', [EmployeeController::class, 'index']);
         Route::post('/employees', [EmployeeController::class, 'store']);
+        Route::get('/self-service', [EmployeeSelfServiceController::class, 'index']);
+        Route::patch('/self-service/profile', [EmployeeSelfServiceController::class, 'updateProfile']);
         Route::get('/organization', [OrganizationController::class, 'index']);
         Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
         Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);
