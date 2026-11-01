@@ -114,6 +114,49 @@ const settlementReviewAcknowledged = ref(false);
 const settlementReviewNote = ref('');
 const settlementReviewError = ref('');
 const settlementExporting = ref(false);
+const performanceData = ref({ cycles: [], reviews: [], employees: [], branches: [], meta: {} });
+const performanceTab = ref('overview');
+const performanceSearch = ref('');
+const performanceStatusFilter = ref('all');
+const selectedPerformanceCycleId = ref(null);
+const selectedPerformanceReviewId = ref(null);
+const showPerformanceCycleForm = ref(false);
+const performanceCycleError = ref('');
+const performanceCycleForm = ref({
+    title: '', period_start: currentMonthStart(), period_end: localDateInput(new Date()),
+    due_date: '', branch_id: '', description: '', employee_ids: [],
+});
+const performanceReviewDrafts = ref({});
+const performanceReviewErrors = ref({});
+const performanceReviewDialog = ref(null);
+const performanceReviewOpen = ref(false);
+const performanceReviewDecision = ref('approve');
+const performanceReviewAcknowledged = ref(false);
+const performanceReviewNote = ref('');
+const performanceReviewError = ref('');
+const performanceExporting = ref(false);
+const trainingData = ref({ programs: [], enrollments: [], employees: [], branches: [], meta: {} });
+const trainingTab = ref('overview');
+const trainingSearch = ref('');
+const trainingStatusFilter = ref('all');
+const selectedTrainingProgramId = ref(null);
+const selectedTrainingEnrollmentId = ref(null);
+const showTrainingProgramForm = ref(false);
+const showTrainingEnrollmentForm = ref(false);
+const editingTrainingProgramId = ref(null);
+const trainingProgramError = ref('');
+const trainingEnrollmentError = ref('');
+const trainingEnrollmentUpdateError = ref('');
+const trainingTransitionOpen = ref(false);
+const trainingTransitionDialog = ref(null);
+const pendingTrainingTransition = ref(null);
+const trainingProgramForm = ref({
+    title: '', category: 'professional', provider: '', delivery_mode: 'classroom',
+    start_date: '', due_date: '', capacity: '', branch_id: '', description: '', status: 'active',
+});
+const trainingEnrollmentForm = ref({ training_program_id: '', employee_id: '', notes: '' });
+const trainingEnrollmentDrafts = ref({});
+const trainingExporting = ref(false);
 const loading = ref(false);
 const busy = ref(false);
 const error = ref('');
@@ -375,6 +418,44 @@ const selectedSettlementTotals = computed(() => {
     }, { earnings: 0, recoveries: 0 });
     return { ...totals, net: totals.earnings - totals.recoveries };
 });
+const performanceCycleEmployees = computed(() => performanceData.value.employees.filter((employee) =>
+    !performanceCycleForm.value.branch_id || String(employee.branch_id) === String(performanceCycleForm.value.branch_id)));
+const visiblePerformanceReviews = computed(() => {
+    const query = performanceSearch.value.trim().toLowerCase();
+    return performanceData.value.reviews.filter((review) => {
+        const statusMatches = performanceStatusFilter.value === 'all' || review.status === performanceStatusFilter.value;
+        const cycleMatches = !selectedPerformanceCycleId.value
+            || String(review.performance_cycle_id) === String(selectedPerformanceCycleId.value);
+        const searchMatches = !query || [
+            review.employee_name, review.employee_code, review.department, review.cycle?.title, review.status,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return statusMatches && cycleMatches && searchMatches;
+    });
+});
+const selectedPerformanceReview = computed(() => performanceData.value.reviews.find((review) => review.id === selectedPerformanceReviewId.value) || null);
+const visibleTrainingPrograms = computed(() => {
+    const query = trainingSearch.value.trim().toLowerCase();
+    return trainingData.value.programs.filter((program) => !query || [
+        program.title, program.category, program.provider, program.delivery_mode, program.branch?.name, program.status,
+    ].some((value) => String(value || '').toLowerCase().includes(query)));
+});
+const visibleTrainingEnrollments = computed(() => {
+    const query = trainingSearch.value.trim().toLowerCase();
+    return trainingData.value.enrollments.filter((enrollment) => {
+        const statusMatches = trainingStatusFilter.value === 'all' || enrollment.status === trainingStatusFilter.value;
+        const searchMatches = !query || [
+            enrollment.employee_name, enrollment.employee_code, enrollment.department,
+            enrollment.program?.title, enrollment.program?.category, enrollment.status,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return statusMatches && searchMatches;
+    });
+});
+const selectedTrainingProgram = computed(() => trainingData.value.programs.find((program) => program.id === selectedTrainingProgramId.value) || null);
+const selectedTrainingEnrollment = computed(() => trainingData.value.enrollments.find((enrollment) => enrollment.id === selectedTrainingEnrollmentId.value) || null);
+const trainingEnrollmentEmployees = computed(() => {
+    const program = trainingData.value.programs.find((entry) => String(entry.id) === String(trainingEnrollmentForm.value.training_program_id));
+    return trainingData.value.employees.filter((employee) => !program?.branch_id || String(employee.branch_id) === String(program.branch_id));
+});
 
 watch([() => payrollCycleForm.value.currency, () => payrollCycleForm.value.branch_id], () => {
     if (showPayrollCycleForm.value) {
@@ -403,6 +484,11 @@ watch(settlementReviewOpen, async (open) => {
     await nextTick();
     if (settlementReviewDialog.value && !settlementReviewDialog.value.open) settlementReviewDialog.value.showModal();
 });
+watch(trainingTransitionOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (trainingTransitionDialog.value && !trainingTransitionDialog.value.open) trainingTransitionDialog.value.showModal();
+});
 watch(benefitEnrollmentEmployees, (employees) => {
     if (!employees.some((employee) => String(employee.id) === String(benefitEnrollmentForm.value.employee_id))) {
         benefitEnrollmentForm.value.employee_id = String(employees[0]?.id || '');
@@ -411,6 +497,30 @@ watch(benefitEnrollmentEmployees, (employees) => {
 watch(visibleBenefitEnrollments, (enrollments) => {
     if (!enrollments.some((enrollment) => enrollment.id === selectedBenefitEnrollmentId.value)) {
         selectedBenefitEnrollmentId.value = enrollments[0]?.id || null;
+    }
+});
+watch(performanceReviewOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (performanceReviewDialog.value && !performanceReviewDialog.value.open) performanceReviewDialog.value.showModal();
+});
+watch([() => performanceCycleForm.value.branch_id, performanceCycleEmployees], () => {
+    const eligibleIds = new Set(performanceCycleEmployees.value.map((employee) => employee.id));
+    performanceCycleForm.value.employee_ids = performanceCycleForm.value.employee_ids.filter((id) => eligibleIds.has(id));
+});
+watch(visiblePerformanceReviews, (reviews) => {
+    if (!reviews.some((review) => review.id === selectedPerformanceReviewId.value)) {
+        selectedPerformanceReviewId.value = reviews[0]?.id || null;
+    }
+});
+watch(trainingEnrollmentEmployees, (employees) => {
+    if (!employees.some((employee) => String(employee.id) === String(trainingEnrollmentForm.value.employee_id))) {
+        trainingEnrollmentForm.value.employee_id = String(employees[0]?.id || '');
+    }
+});
+watch(visibleTrainingEnrollments, (enrollments) => {
+    if (!enrollments.some((enrollment) => enrollment.id === selectedTrainingEnrollmentId.value)) {
+        selectedTrainingEnrollmentId.value = enrollments[0]?.id || null;
     }
 });
 const recruitmentStages = [
@@ -633,6 +743,48 @@ async function loadActive() {
             }
             if (!separationData.value.offboarding_cases.some((caseItem) => String(caseItem.id) === String(settlementForm.value.lifecycle_case_id))) {
                 settlementForm.value.lifecycle_case_id = String(eligibleSettlementCases.value[0]?.id || '');
+            }
+        }
+        if (activeSlug.value === 'performance' && canManageOrganization.value) {
+            performanceData.value = await api('/performance');
+            performanceReviewDrafts.value = Object.fromEntries(performanceData.value.reviews.map((review) => [
+                review.id,
+                {
+                    rating: review.rating ?? '',
+                    goals: review.goals || '',
+                    results: review.results || '',
+                    strengths: review.strengths || '',
+                    development_focus: review.development_focus || '',
+                },
+            ]));
+            performanceReviewErrors.value = {};
+            if (!performanceData.value.cycles.some((cycle) => cycle.id === selectedPerformanceCycleId.value)) {
+                selectedPerformanceCycleId.value = null;
+            }
+            if (!performanceData.value.reviews.some((review) => review.id === selectedPerformanceReviewId.value)) {
+                selectedPerformanceReviewId.value = performanceData.value.reviews[0]?.id || null;
+            }
+            if (!performanceData.value.employees.some((employee) => String(employee.id) === String(performanceCycleForm.value.employee_ids[0]))) {
+                performanceCycleForm.value.employee_ids = [];
+            }
+        }
+        if (activeSlug.value === 'training' && canManageOrganization.value) {
+            trainingData.value = await api('/training');
+            trainingEnrollmentDrafts.value = Object.fromEntries(trainingData.value.enrollments.map((enrollment) => [
+                enrollment.id,
+                { status: enrollment.status, notes: enrollment.notes || '' },
+            ]));
+            if (!trainingData.value.programs.some((program) => program.id === selectedTrainingProgramId.value)) {
+                selectedTrainingProgramId.value = trainingData.value.programs[0]?.id || null;
+            }
+            if (!trainingData.value.enrollments.some((enrollment) => enrollment.id === selectedTrainingEnrollmentId.value)) {
+                selectedTrainingEnrollmentId.value = trainingData.value.enrollments[0]?.id || null;
+            }
+            if (!trainingData.value.programs.some((program) => String(program.id) === String(trainingEnrollmentForm.value.training_program_id))) {
+                trainingEnrollmentForm.value.training_program_id = String(trainingData.value.programs.find((program) => program.status === 'active')?.id || '');
+            }
+            if (!trainingData.value.employees.some((employee) => String(employee.id) === String(trainingEnrollmentForm.value.employee_id))) {
+                trainingEnrollmentForm.value.employee_id = String(trainingEnrollmentEmployees.value[0]?.id || '');
             }
         }
         if (activeSlug.value === 'leave') leaveData.value = await api('/leave');
@@ -1059,6 +1211,326 @@ function exportPayrollWorkpaper() {
         message(requestError.message, true);
     } finally {
         payrollExporting.value = false;
+    }
+}
+
+function openPerformanceCycleForm() {
+    performanceCycleError.value = '';
+    performanceCycleForm.value = {
+        title: '', period_start: currentMonthStart(), period_end: localDateInput(new Date()),
+        due_date: '', branch_id: user.value?.branch_id ? String(user.value.branch_id) : '',
+        description: '', employee_ids: [],
+    };
+    showPerformanceCycleForm.value = true;
+    performanceTab.value = 'cycles';
+}
+
+function togglePerformanceEmployee(employeeId) {
+    const employeeIds = performanceCycleForm.value.employee_ids;
+    performanceCycleForm.value.employee_ids = employeeIds.includes(employeeId)
+        ? employeeIds.filter((id) => id !== employeeId)
+        : [...employeeIds, employeeId];
+}
+
+function toggleAllPerformanceEmployees() {
+    const allIds = performanceCycleEmployees.value.map((employee) => employee.id);
+    performanceCycleForm.value.employee_ids = allIds.length
+        && allIds.every((id) => performanceCycleForm.value.employee_ids.includes(id))
+        ? []
+        : allIds;
+}
+
+function openPerformanceCycle(cycle) {
+    selectedPerformanceCycleId.value = cycle.id;
+    performanceStatusFilter.value = 'all';
+    performanceTab.value = 'reviews';
+}
+
+async function createPerformanceCycle() {
+    performanceCycleError.value = '';
+    busy.value = true;
+    try {
+        const result = await api('/performance/cycles', {
+            method: 'POST',
+            body: JSON.stringify({
+                ...performanceCycleForm.value,
+                branch_id: performanceCycleForm.value.branch_id ? Number(performanceCycleForm.value.branch_id) : null,
+                due_date: performanceCycleForm.value.due_date || null,
+                employee_ids: performanceCycleForm.value.employee_ids,
+            }),
+        });
+        showPerformanceCycleForm.value = false;
+        selectedPerformanceCycleId.value = result.cycle.id;
+        performanceTab.value = 'reviews';
+        performanceStatusFilter.value = 'all';
+        message('Performance cycle created with individual draft reviews.');
+        await loadActive();
+    } catch (requestError) {
+        performanceCycleError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function updatePerformanceCycleStatus(cycle, status) {
+    busy.value = true;
+    try {
+        await api(`/performance/cycles/${cycle.id}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status }),
+        });
+        message(status === 'closed' ? 'Performance cycle closed.' : 'Performance cycle reopened.');
+        await loadActive();
+    } catch (requestError) {
+        message(requestError.message, true);
+    } finally {
+        busy.value = false;
+    }
+}
+
+function performanceReviewChanged(review) {
+    const draft = performanceReviewDrafts.value[review.id];
+    if (!draft) return false;
+    return String(draft.rating ?? '') !== String(review.rating ?? '')
+        || String(draft.goals || '') !== String(review.goals || '')
+        || String(draft.results || '') !== String(review.results || '')
+        || String(draft.strengths || '') !== String(review.strengths || '')
+        || String(draft.development_focus || '') !== String(review.development_focus || '');
+}
+
+async function savePerformanceReview(review) {
+    performanceReviewErrors.value = { ...performanceReviewErrors.value, [review.id]: '' };
+    busy.value = true;
+    try {
+        const draft = performanceReviewDrafts.value[review.id];
+        await api(`/performance/reviews/${review.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ ...draft, rating: draft.rating === '' ? null : Number(draft.rating) }),
+        });
+        message(`Saved the review draft for ${review.employee_name}.`);
+        await loadActive();
+    } catch (requestError) {
+        performanceReviewErrors.value = { ...performanceReviewErrors.value, [review.id]: requestError.message };
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function submitPerformanceReview(review) {
+    performanceReviewErrors.value = { ...performanceReviewErrors.value, [review.id]: '' };
+    busy.value = true;
+    try {
+        await api(`/performance/reviews/${review.id}/submit`, { method: 'POST', body: '{}' });
+        message(`Review for ${review.employee_name} submitted for approval.`);
+        await loadActive();
+    } catch (requestError) {
+        performanceReviewErrors.value = { ...performanceReviewErrors.value, [review.id]: requestError.message };
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openPerformanceReviewDecision(review, decision) {
+    selectedPerformanceReviewId.value = review.id;
+    performanceReviewDecision.value = decision;
+    performanceReviewAcknowledged.value = false;
+    performanceReviewNote.value = '';
+    performanceReviewError.value = '';
+    performanceReviewOpen.value = true;
+}
+
+async function decidePerformanceReview() {
+    const review = selectedPerformanceReview.value;
+    if (!review) return;
+    performanceReviewError.value = '';
+    busy.value = true;
+    try {
+        await api(`/performance/reviews/${review.id}/review`, {
+            method: 'POST',
+            body: JSON.stringify({
+                decision: performanceReviewDecision.value,
+                review_note: performanceReviewNote.value.trim() || null,
+            }),
+        });
+        performanceReviewOpen.value = false;
+        message(performanceReviewDecision.value === 'approve'
+            ? 'Performance review approved and recorded.'
+            : 'Performance review returned with requested changes.');
+        await loadActive();
+    } catch (requestError) {
+        performanceReviewError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function exportPerformanceReviews() {
+    performanceExporting.value = true;
+    try {
+        downloadCsv([
+            ['Cycle', 'Period start', 'Period end', 'Due date', 'Employee code', 'Employee', 'Department', 'Manual rating (1-5)', 'Goals', 'Results', 'Strengths', 'Development focus', 'Status', 'Review note'],
+            ...visiblePerformanceReviews.value.map((review) => [
+                review.cycle?.title, review.cycle?.period_start, review.cycle?.period_end,
+                review.cycle?.due_date, review.employee_code, review.employee_name,
+                review.department, review.rating, review.goals, review.results,
+                review.strengths, review.development_focus, review.status, review.review_note,
+            ]),
+        ], `performance-reviews-${localDateInput(new Date())}.csv`);
+        message(`Exported ${visiblePerformanceReviews.value.length} performance review records.`);
+    } catch (requestError) {
+        message(requestError.message, true);
+    } finally {
+        performanceExporting.value = false;
+    }
+}
+
+function openTrainingProgramForm(program = null) {
+    editingTrainingProgramId.value = program?.id || null;
+    trainingProgramError.value = '';
+    trainingProgramForm.value = program ? {
+        title: program.title,
+        category: program.category,
+        provider: program.provider || '',
+        delivery_mode: program.delivery_mode,
+        start_date: program.start_date || '',
+        due_date: program.due_date || '',
+        capacity: program.capacity ?? '',
+        branch_id: program.branch_id ? String(program.branch_id) : '',
+        description: program.description || '',
+        status: program.status,
+    } : {
+        title: '', category: 'professional', provider: '', delivery_mode: 'classroom',
+        start_date: '', due_date: '', capacity: '',
+        branch_id: user.value?.branch_id ? String(user.value.branch_id) : '',
+        description: '', status: 'active',
+    };
+    showTrainingProgramForm.value = true;
+    trainingTab.value = 'catalog';
+}
+
+async function saveTrainingProgram() {
+    trainingProgramError.value = '';
+    busy.value = true;
+    try {
+        const editing = Boolean(editingTrainingProgramId.value);
+        const result = await api(editing
+            ? `/training/programs/${editingTrainingProgramId.value}`
+            : '/training/programs', {
+            method: editing ? 'PATCH' : 'POST',
+            body: JSON.stringify({
+                ...trainingProgramForm.value,
+                branch_id: trainingProgramForm.value.branch_id ? Number(trainingProgramForm.value.branch_id) : null,
+                start_date: trainingProgramForm.value.start_date || null,
+                due_date: trainingProgramForm.value.due_date || null,
+                capacity: trainingProgramForm.value.capacity === '' ? null : Number(trainingProgramForm.value.capacity),
+            }),
+        });
+        showTrainingProgramForm.value = false;
+        editingTrainingProgramId.value = null;
+        selectedTrainingProgramId.value = result.program.id;
+        message(editing ? 'Training program settings saved.' : 'Training program created.');
+        await loadActive();
+    } catch (requestError) {
+        trainingProgramError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openTrainingEnrollmentForm(program = null) {
+    trainingEnrollmentError.value = '';
+    trainingEnrollmentForm.value = {
+        training_program_id: String(program?.id || trainingData.value.programs.find((entry) => entry.status === 'active')?.id || ''),
+        employee_id: '',
+        notes: '',
+    };
+    trainingEnrollmentForm.value.employee_id = String(trainingEnrollmentEmployees.value[0]?.id || '');
+    showTrainingEnrollmentForm.value = true;
+    trainingTab.value = 'enrollments';
+}
+
+async function createTrainingEnrollment() {
+    trainingEnrollmentError.value = '';
+    busy.value = true;
+    try {
+        const result = await api('/training/enrollments', {
+            method: 'POST',
+            body: JSON.stringify({
+                ...trainingEnrollmentForm.value,
+                training_program_id: Number(trainingEnrollmentForm.value.training_program_id),
+                employee_id: Number(trainingEnrollmentForm.value.employee_id),
+            }),
+        });
+        showTrainingEnrollmentForm.value = false;
+        selectedTrainingEnrollmentId.value = result.enrollment.id;
+        message(`${result.enrollment.employee_name} assigned to the training program.`);
+        await loadActive();
+    } catch (requestError) {
+        trainingEnrollmentError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function trainingEnrollmentChanged(enrollment) {
+    const draft = trainingEnrollmentDrafts.value[enrollment.id];
+    return Boolean(draft) && (draft.status !== enrollment.status || String(draft.notes || '') !== String(enrollment.notes || ''));
+}
+
+function trainingStatusOptions(enrollment) {
+    if (enrollment.status === 'assigned') return ['assigned', 'in_progress', 'completed', 'cancelled'];
+    if (enrollment.status === 'in_progress') return ['in_progress', 'completed', 'cancelled'];
+    return [enrollment.status];
+}
+
+async function saveTrainingEnrollment(enrollment, confirmed = false) {
+    trainingEnrollmentUpdateError.value = '';
+    const nextStatus = trainingEnrollmentDrafts.value[enrollment.id]?.status;
+    if (!confirmed && nextStatus !== enrollment.status && ['completed', 'cancelled'].includes(nextStatus)) {
+        pendingTrainingTransition.value = enrollment;
+        trainingTransitionOpen.value = true;
+        return;
+    }
+    busy.value = true;
+    try {
+        const result = await api(`/training/enrollments/${enrollment.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify(trainingEnrollmentDrafts.value[enrollment.id]),
+        });
+        pendingTrainingTransition.value = null;
+        message(`${result.enrollment.employee_name}'s training record updated.`);
+        await loadActive();
+    } catch (requestError) {
+        trainingEnrollmentUpdateError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function confirmTrainingEnrollmentTransition() {
+    const enrollment = pendingTrainingTransition.value;
+    if (!enrollment) return;
+    trainingTransitionDialog.value?.close();
+    await saveTrainingEnrollment(enrollment, true);
+}
+
+function exportTrainingEnrollments() {
+    trainingExporting.value = true;
+    try {
+        downloadCsv([
+            ['Program', 'Category', 'Provider', 'Delivery mode', 'Employee code', 'Employee', 'Department', 'Status', 'Start date', 'Due date', 'Completed at', 'Notes'],
+            ...visibleTrainingEnrollments.value.map((enrollment) => [
+                enrollment.program?.title, enrollment.program?.category, enrollment.program?.provider,
+                enrollment.program?.delivery_mode, enrollment.employee_code, enrollment.employee_name,
+                enrollment.department, enrollment.status, enrollment.program?.start_date,
+                enrollment.program?.due_date, enrollment.completed_at, enrollment.notes,
+            ]),
+        ], `training-enrollments-${localDateInput(new Date())}.csv`);
+        message(`Exported ${visibleTrainingEnrollments.value.length} training enrollment records.`);
+    } catch (requestError) {
+        message(requestError.message, true);
+    } finally {
+        trainingExporting.value = false;
     }
 }
 
@@ -3321,6 +3793,77 @@ onUnmounted(() => {
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">▣</span><b>Separation records are restricted</b><p>Exit clearances and settlement workpapers are visible to HR and administrators only.</p></section>
                 </template>
 
+                <template v-else-if="activeSlug === 'performance'">
+                    <template v-if="canManageOrganization">
+                        <section class="growth-hero performance-hero">
+                            <div><span class="eyebrow">GROWTH &amp; DEVELOPMENT <span>•</span> PERFORMANCE</span><h1>Make progress visible.</h1><p>Set clear review periods, document outcomes, and keep every decision human and traceable.</p></div>
+                            <div class="growth-hero-actions"><button class="button growth-outline-button" :disabled="!performanceData.employees.length" @click="exportPerformanceReviews">↓ Export reviews</button><button class="button growth-primary-button" :disabled="!performanceData.employees.length" @click="openPerformanceCycleForm">＋ Create review cycle <span>→</span></button></div>
+                        </section>
+                        <section class="growth-metrics" aria-label="Performance workspace summary">
+                            <article><span class="growth-metric-icon">◷</span><div><span class="eyebrow">OPEN CYCLES</span><b>{{ performanceData.meta.open_cycles ?? 0 }}</b><small>Active review periods</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">✎</span><div><span class="eyebrow">NEEDS ATTENTION</span><b>{{ performanceData.meta.reviews_in_progress ?? 0 }}</b><small>Drafts and reviews</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">APPROVED REVIEWS</span><b>{{ performanceData.meta.reviews_approved ?? 0 }}</b><small>Recorded decisions</small></div></article>
+                        </section>
+                        <section class="panel growth-panel">
+                            <div class="growth-toolbar">
+                                <nav class="growth-tabs" aria-label="Performance workspace"><button :class="{ active: performanceTab === 'overview' }" @click="performanceTab = 'overview'; selectedPerformanceCycleId = null">Overview</button><button :class="{ active: performanceTab === 'cycles' }" @click="performanceTab = 'cycles'; selectedPerformanceCycleId = null">Review cycles <span>{{ performanceData.cycles.length }}</span></button><button :class="{ active: performanceTab === 'reviews' }" @click="performanceTab = 'reviews'">Review records <span>{{ performanceData.reviews.length }}</span></button></nav>
+                                <div v-if="performanceTab === 'reviews'" class="growth-toolbar-filters"><label><span class="visually-hidden">Filter reviews by status</span><select v-model="performanceStatusFilter"><option value="all">All statuses</option><option value="draft">Draft</option><option value="changes_requested">Changes requested</option><option value="in_review">In review</option><option value="approved">Approved</option></select></label><label class="table-search growth-search"><span>⌕</span><input v-model="performanceSearch" aria-label="Search performance reviews" placeholder="Search employee or cycle"></label><button class="button button-soft growth-export" :disabled="performanceExporting" @click="exportPerformanceReviews">↓ CSV</button></div>
+                            </div>
+                            <section v-if="showPerformanceCycleForm" class="growth-form">
+                                <div class="growth-form-heading"><div><span class="eyebrow">REVIEW CYCLE SETUP</span><h2>Start with a clear review window.</h2><p>Creates one private draft per selected employee. No scores or employment decisions are generated automatically.</p></div><button class="icon-button" aria-label="Close review cycle form" @click="showPerformanceCycleForm = false; performanceCycleError = ''">×</button></div>
+                                <form class="growth-form-grid" @submit.prevent="createPerformanceCycle">
+                                    <label>Cycle name<input v-model.trim="performanceCycleForm.title" maxlength="140" required placeholder="Annual growth review"></label>
+                                    <label v-if="!user.branch_id">Branch scope<select v-model="performanceCycleForm.branch_id"><option value="">All company branches</option><option v-for="branch in performanceData.branches" :key="branch.id" :value="String(branch.id)">{{ branch.name }}</option></select></label>
+                                    <label>Review period begins<input v-model="performanceCycleForm.period_start" type="date" required></label>
+                                    <label>Review period ends<input v-model="performanceCycleForm.period_end" type="date" :min="performanceCycleForm.period_start" required></label>
+                                    <label>Reviews due by<input v-model="performanceCycleForm.due_date" type="date" :min="performanceCycleForm.period_end"></label>
+                                    <label class="growth-field-wide">Purpose and guidance<textarea v-model.trim="performanceCycleForm.description" rows="2" maxlength="4000" placeholder="Share context and expectations for reviewers"></textarea></label>
+                                    <fieldset class="growth-employee-picker growth-field-wide"><legend>Employees included <span>{{ performanceCycleForm.employee_ids.length }} selected</span></legend><div class="growth-picker-tools"><span>Only active employees in the selected scope are listed.</span><button type="button" class="text-link" @click="toggleAllPerformanceEmployees">{{ performanceCycleForm.employee_ids.length === performanceCycleEmployees.length ? 'Clear selection' : 'Select all' }}</button></div><div v-if="performanceCycleEmployees.length" class="growth-employee-options"><label v-for="employee in performanceCycleEmployees" :key="employee.id"><input type="checkbox" :checked="performanceCycleForm.employee_ids.includes(employee.id)" @change="togglePerformanceEmployee(employee.id)"><span><b>{{ fullName(employee) }}</b><small>{{ employee.employee_code }} · {{ employee.department || 'Team not set' }}</small></span><small>{{ employee.branch?.name || 'Company' }}</small></label></div><div v-else class="growth-picker-empty">No active employees are available in this scope.</div></fieldset>
+                                    <div v-if="performanceCycleError" class="inline-error growth-field-wide" role="alert">{{ performanceCycleError }}</div>
+                                    <div class="growth-form-footer growth-field-wide"><span>Review text and ratings are manually entered; use your approved internal review policy.</span><div><button type="button" class="button button-soft" @click="showPerformanceCycleForm = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || !performanceCycleForm.employee_ids.length">Create cycle &amp; drafts</button></div></div>
+                                </form>
+                            </section>
+                            <template v-if="performanceTab === 'overview'">
+                                <div class="growth-overview-grid">
+                                    <article class="growth-overview-card"><div class="growth-section-heading"><div><span class="eyebrow">REVIEW PROGRAM</span><h2>Consistent conversations, grounded in evidence.</h2><p>Run a review cycle with explicit participants, a defined period, and a documented decision.</p></div><button class="text-link" @click="performanceTab = 'cycles'">View all cycles →</button></div><div class="growth-mini-stats"><span><b>{{ performanceData.cycles.length }}</b><small>Total cycles</small></span><span><b>{{ performanceData.reviews.length }}</b><small>Individual reviews</small></span><span><b>{{ performanceData.meta.reviews_approved ?? 0 }}</b><small>Approved</small></span></div><button class="button button-primary" :disabled="!performanceData.employees.length" @click="openPerformanceCycleForm">Create a review cycle →</button></article>
+                                    <article class="growth-overview-card"><div class="growth-section-heading"><div><span class="eyebrow">REVIEW QUEUE</span><h2>Review the work, not just the number.</h2><p>Pending drafts, returned records, and submitted reviews stay easy to find.</p></div><button class="text-link" @click="performanceTab = 'reviews'; performanceStatusFilter = 'in_review'; selectedPerformanceCycleId = null">Open queue →</button></div><div v-if="performanceData.reviews.some((review) => review.status === 'in_review')" class="growth-queue-list"><button v-for="review in performanceData.reviews.filter((entry) => entry.status === 'in_review').slice(0, 4)" :key="review.id" class="growth-queue-row" @click="selectedPerformanceReviewId = review.id; selectedPerformanceCycleId = null; performanceTab = 'reviews'"><span class="avatar">{{ initials({ first_name: review.employee_name }) }}</span><span><b>{{ review.employee_name }}</b><small>{{ review.cycle?.title }} · Rating {{ review.rating }}/5</small></span><span>Review →</span></button></div><div v-else class="growth-empty-inline"><span class="growth-empty-symbol">✓</span><b>No reviews awaiting approval</b><p>Submitted review records will appear here for an HR decision.</p></div></article>
+                                </div>
+                                <div class="growth-boundary-note"><span>ⓘ</span><p>Ratings are human-entered and descriptive only. No ranking, promotion, compensation, disciplinary, or termination recommendation is generated.</p><span>HR &amp; admin only</span></div>
+                            </template>
+                            <section v-else-if="performanceTab === 'cycles'" class="growth-cycle-list">
+                                <article v-for="cycle in performanceData.cycles" :key="cycle.id" class="growth-cycle-card"><span class="growth-cycle-mark">✳</span><div class="growth-cycle-copy"><span class="eyebrow">{{ cycle.branch?.name || 'COMPANY-WIDE' }} <span class="dot-separator">•</span> {{ formatDate(cycle.period_start) }} – {{ formatDate(cycle.period_end) }}</span><h3>{{ cycle.title }}</h3><p>{{ cycle.description || 'No review guidance added.' }}</p><small>{{ cycle.reviews_count }} participants · {{ cycle.completed_review_count }} approved<span v-if="cycle.due_date"> · Due {{ formatDate(cycle.due_date) }}</span></small></div><span class="status-pill" :class="cycle.status === 'open' ? 'benefit-status-active' : 'status-planned'">{{ cycle.status }}</span><button class="button button-soft growth-cycle-open" @click="openPerformanceCycle(cycle)">Open reviews →</button><button v-if="(!user.branch_id || cycle.branch_id) && cycle.status === 'open' && cycle.reviews_count === cycle.completed_review_count" class="button button-soft growth-cycle-status" :disabled="busy" @click="updatePerformanceCycleStatus(cycle, 'closed')">Close cycle</button><button v-else-if="(!user.branch_id || cycle.branch_id) && cycle.status === 'closed'" class="button button-soft growth-cycle-status" :disabled="busy" @click="updatePerformanceCycleStatus(cycle, 'open')">Reopen</button></article>
+                                <div v-if="!performanceData.cycles.length" class="growth-empty-state"><span class="empty-icon">◷</span><b>Start with a review cycle</b><p>Set the review period, include employees explicitly, and create private draft records.</p><button class="button button-primary" :disabled="!performanceData.employees.length" @click="openPerformanceCycleForm">Create first cycle</button></div>
+                            </section>
+                            <section v-else-if="performanceTab === 'reviews'" class="growth-review-layout">
+                                <div class="growth-review-list-panel"><div class="growth-review-list-heading"><span class="eyebrow">{{ selectedPerformanceCycleId ? performanceData.cycles.find((cycle) => cycle.id === selectedPerformanceCycleId)?.title || 'CYCLE REVIEWS' : 'INDIVIDUAL REVIEW REGISTER' }}</span><button v-if="selectedPerformanceCycleId" class="text-link" @click="selectedPerformanceCycleId = null">Show all</button><b v-else>{{ visiblePerformanceReviews.length }} records</b></div><button v-for="review in visiblePerformanceReviews" :key="review.id" class="growth-review-option" :class="{ active: selectedPerformanceReviewId === review.id }" @click="selectedPerformanceReviewId = review.id"><span class="avatar">{{ initials({ first_name: review.employee_name }) }}</span><span><b>{{ review.employee_name }}</b><small>{{ review.employee_code }} · {{ review.department || 'Team not set' }}</small><small>{{ review.cycle?.title }}</small></span><span class="status-pill" :class="`benefit-status-${review.status}`">{{ review.status.replace('_', ' ') }}</span></button><div v-if="!visiblePerformanceReviews.length" class="growth-empty-inline"><b>No reviews match</b><p>{{ performanceData.reviews.length ? 'Adjust the search, cycle, or status filter.' : 'Create a cycle to start your first review.' }}</p></div></div>
+                                <article v-if="selectedPerformanceReview" class="growth-review-detail"><div class="growth-detail-heading"><span class="avatar">{{ initials({ first_name: selectedPerformanceReview.employee_name }) }}</span><div><span class="eyebrow">{{ selectedPerformanceReview.cycle?.title }} <span class="dot-separator">•</span> {{ formatDate(selectedPerformanceReview.cycle?.period_start) }} – {{ formatDate(selectedPerformanceReview.cycle?.period_end) }}</span><h2>{{ selectedPerformanceReview.employee_name }}</h2><p>{{ selectedPerformanceReview.employee_code }} · {{ selectedPerformanceReview.department || 'Team not set' }}</p></div><span class="status-pill" :class="`benefit-status-${selectedPerformanceReview.status}`">{{ selectedPerformanceReview.status.replace('_', ' ') }}</span></div><div v-if="selectedPerformanceReview.review_note" class="payroll-review-note"><b>Reviewer note</b><p>{{ selectedPerformanceReview.review_note }}</p></div>
+                                    <div v-if="performanceReviewDrafts[selectedPerformanceReview.id]" class="growth-review-fields"><label>Manual review rating<select v-model="performanceReviewDrafts[selectedPerformanceReview.id].rating" :disabled="!['draft', 'changes_requested'].includes(selectedPerformanceReview.status)"><option value="">Not rated</option><option value="1">1 · Needs support</option><option value="2">2 · Developing</option><option value="3">3 · Consistent</option><option value="4">4 · Strong</option><option value="5">5 · Exceptional</option></select><small>Human-entered descriptive input; no automatic score.</small></label><label>Goals and expectations<textarea v-model.trim="performanceReviewDrafts[selectedPerformanceReview.id].goals" rows="3" maxlength="4000" :disabled="!['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" placeholder="What outcomes were agreed for this period?"></textarea></label><label>Results and evidence<textarea v-model.trim="performanceReviewDrafts[selectedPerformanceReview.id].results" rows="3" maxlength="4000" :disabled="!['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" placeholder="Record outcomes and supporting context"></textarea></label><label>Recognized strengths<textarea v-model.trim="performanceReviewDrafts[selectedPerformanceReview.id].strengths" rows="2" maxlength="4000" :disabled="!['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" placeholder="Specific strengths and contributions"></textarea></label><label>Development focus<textarea v-model.trim="performanceReviewDrafts[selectedPerformanceReview.id].development_focus" rows="2" maxlength="4000" :disabled="!['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" placeholder="Agreed next steps and support"></textarea></label></div>
+                                    <div v-if="performanceReviewErrors[selectedPerformanceReview.id]" class="inline-error" role="alert">{{ performanceReviewErrors[selectedPerformanceReview.id] }}</div><div class="growth-detail-footer"><span v-if="selectedPerformanceReview.status === 'approved'" class="payroll-approved-note">Approved {{ formatDate(selectedPerformanceReview.reviewed_at) }} · recorded only</span><span v-else-if="selectedPerformanceReview.status === 'in_review'" class="payroll-waiting-note">Locked while awaiting HR review.</span><span v-else class="payroll-draft-note">Manual narrative and rating; no employment action is triggered.</span><div class="growth-detail-actions"><button v-if="['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" class="button button-soft" :disabled="busy || !performanceReviewChanged(selectedPerformanceReview)" @click="savePerformanceReview(selectedPerformanceReview)">Save draft</button><button v-if="['draft', 'changes_requested'].includes(selectedPerformanceReview.status)" class="button button-primary" :disabled="busy || performanceReviewChanged(selectedPerformanceReview) || !selectedPerformanceReview.rating || !selectedPerformanceReview.goals || !selectedPerformanceReview.results" @click="submitPerformanceReview(selectedPerformanceReview)">Submit for review →</button><button v-if="selectedPerformanceReview.status === 'in_review'" class="button button-soft" @click="openPerformanceReviewDecision(selectedPerformanceReview, 'return')">Request changes</button><button v-if="selectedPerformanceReview.status === 'in_review'" class="button button-primary" @click="openPerformanceReviewDecision(selectedPerformanceReview, 'approve')">Approve review</button></div></div>
+                                </article><div v-else class="growth-review-detail growth-empty-inline"><b>Select an employee review</b><p>Choose an entry from the register to review its narrative and decision status.</p></div>
+                            </section>
+                        </section>
+                        <div class="growth-boundary-note"><span>ⓘ</span><p>Performance records are confidential internal workpapers. Ratings are manually entered and do not determine pay, promotion, discipline, or termination.</p><span>HR &amp; admin only</span></div>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">▣</span><b>Performance records are restricted</b><p>Review cycle and employee review records are available to HR and administrators only.</p></section>
+                </template>
+
+                <template v-else-if="activeSlug === 'training'">
+                    <template v-if="canManageOrganization">
+                        <section class="growth-hero training-hero"><div><span class="eyebrow">GROWTH &amp; DEVELOPMENT <span>•</span> LEARNING STUDIO</span><h1>Build skills with intention.</h1><p>Plan learning programs, assign the right people, and keep completion history in one place.</p></div><div class="growth-hero-actions"><button class="button growth-outline-button" :disabled="!trainingData.enrollments.length" @click="exportTrainingEnrollments">↓ Export register</button><button class="button growth-primary-button" :disabled="!trainingData.programs.some((program) => program.status === 'active') || !trainingData.employees.length" @click="openTrainingEnrollmentForm">＋ Assign learning <span>→</span></button><button class="button growth-secondary-button" @click="openTrainingProgramForm">＋ New program</button></div></section>
+                        <section class="growth-metrics" aria-label="Training workspace summary"><article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">ACTIVE PROGRAMS</span><b>{{ trainingData.meta.active_programs ?? 0 }}</b><small>Available learning</small></div></article><article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">IN PROGRESS</span><b>{{ trainingData.meta.active_enrollments ?? 0 }}</b><small>Assigned or underway</small></div></article><article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">COMPLETED</span><b>{{ trainingData.meta.completed_enrollments ?? 0 }}</b><small>Recorded completions</small></div></article><article><span class="growth-metric-icon growth-metric-overdue">!</span><div><span class="eyebrow">PAST DUE</span><b>{{ trainingData.meta.overdue_enrollments ?? 0 }}</b><small>Manual follow-up needed</small></div></article></section>
+                        <section class="panel growth-panel">
+                            <div class="growth-toolbar"><nav class="growth-tabs" aria-label="Training workspace"><button :class="{ active: trainingTab === 'overview' }" @click="trainingTab = 'overview'">Overview</button><button :class="{ active: trainingTab === 'catalog' }" @click="trainingTab = 'catalog'">Program catalog <span>{{ trainingData.programs.length }}</span></button><button :class="{ active: trainingTab === 'enrollments' }" @click="trainingTab = 'enrollments'">Assignments <span>{{ trainingData.enrollments.length }}</span></button></nav><div v-if="trainingTab !== 'overview'" class="growth-toolbar-filters"><label v-if="trainingTab === 'enrollments'"><span class="visually-hidden">Filter assignments by status</span><select v-model="trainingStatusFilter"><option value="all">All statuses</option><option value="assigned">Assigned</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></label><label class="table-search growth-search"><span>⌕</span><input v-model="trainingSearch" :aria-label="trainingTab === 'catalog' ? 'Search training programs' : 'Search assignments'" :placeholder="trainingTab === 'catalog' ? 'Search programs or providers' : 'Search employee or program'"></label><button v-if="trainingTab === 'enrollments'" class="button button-soft growth-export" :disabled="trainingExporting" @click="exportTrainingEnrollments">↓ CSV</button></div></div>
+                            <section v-if="showTrainingProgramForm" class="growth-form"><div class="growth-form-heading"><div><span class="eyebrow">PROGRAM SETTINGS</span><h2>{{ editingTrainingProgramId ? 'Edit learning program' : 'Create a learning program' }}</h2><p>Maintain a simple catalog. Completion and credentials are recorded manually; no provider is contacted.</p></div><button class="icon-button" aria-label="Close training program form" @click="showTrainingProgramForm = false; trainingProgramError = ''">×</button></div><form class="growth-form-grid" @submit.prevent="saveTrainingProgram"><label>Program name<input v-model.trim="trainingProgramForm.title" maxlength="160" required placeholder="Manager essentials"></label><label>Category<select v-model="trainingProgramForm.category"><option value="leadership">Leadership</option><option value="technical">Technical</option><option value="compliance">Compliance</option><option value="safety">Safety</option><option value="onboarding">Onboarding</option><option value="professional">Professional development</option><option value="other">Other</option></select></label><label>Delivery format<select v-model="trainingProgramForm.delivery_mode"><option value="classroom">Classroom</option><option value="virtual">Virtual</option><option value="self_paced">Self-paced</option><option value="blended">Blended</option></select></label><label>Provider (optional)<input v-model.trim="trainingProgramForm.provider" maxlength="180" placeholder="Internal or external provider"></label><label>Starts on<input v-model="trainingProgramForm.start_date" type="date"></label><label>Target completion date<input v-model="trainingProgramForm.due_date" type="date" :min="trainingProgramForm.start_date"></label><label>Enrollment capacity<input v-model="trainingProgramForm.capacity" type="number" min="1" max="100000" placeholder="No limit"></label><label v-if="editingTrainingProgramId">Program status<select v-model="trainingProgramForm.status"><option value="active">Active</option><option value="archived">Archived</option></select></label><label v-if="!user.branch_id">Branch scope<select v-model="trainingProgramForm.branch_id" :disabled="Boolean(editingTrainingProgramId)"><option value="">Company-wide</option><option v-for="branch in trainingData.branches" :key="branch.id" :value="String(branch.id)">{{ branch.name }}</option></select></label><label class="growth-field-wide">Program outline<textarea v-model.trim="trainingProgramForm.description" rows="2" maxlength="4000" placeholder="Summarize learning outcomes and audience"></textarea></label><div v-if="trainingProgramError" class="inline-error growth-field-wide" role="alert">{{ trainingProgramError }}</div><div class="growth-form-footer growth-field-wide"><span>Use internal policy to determine requirements and credit.</span><div><button type="button" class="button button-soft" @click="showTrainingProgramForm = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ editingTrainingProgramId ? 'Save settings' : 'Create program' }}</button></div></div></form></section>
+                            <section v-if="showTrainingEnrollmentForm" class="growth-form"><div class="growth-form-heading"><div><span class="eyebrow">EMPLOYEE ASSIGNMENT</span><h2>Assign a learning program.</h2><p>Creates a manual assignment record; it does not register the learner with a provider.</p></div><button class="icon-button" aria-label="Close training assignment form" @click="showTrainingEnrollmentForm = false; trainingEnrollmentError = ''">×</button></div><form class="growth-form-grid" @submit.prevent="createTrainingEnrollment"><label>Learning program<select v-model="trainingEnrollmentForm.training_program_id" required><option value="" disabled>Select an active program</option><option v-for="program in trainingData.programs.filter((entry) => entry.status === 'active')" :key="program.id" :value="String(program.id)">{{ program.title }}{{ program.due_date ? ` · Due ${formatDate(program.due_date)}` : '' }}</option></select></label><label>Employee<select v-model="trainingEnrollmentForm.employee_id" required><option value="" disabled>Select employee</option><option v-for="employee in trainingEnrollmentEmployees" :key="employee.id" :value="String(employee.id)">{{ fullName(employee) }} · {{ employee.employee_code }}</option></select></label><label class="growth-field-wide">Assignment note<textarea v-model.trim="trainingEnrollmentForm.notes" rows="2" maxlength="2000" placeholder="Optional context or follow-up"></textarea></label><div v-if="trainingEnrollmentError" class="inline-error growth-field-wide" role="alert">{{ trainingEnrollmentError }}</div><div class="growth-form-footer growth-field-wide"><span>Capacity and duplicate assignments are checked before saving.</span><div><button type="button" class="button button-soft" @click="showTrainingEnrollmentForm = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || !trainingEnrollmentForm.training_program_id || !trainingEnrollmentForm.employee_id">Assign employee</button></div></div></form></section>
+                            <template v-if="trainingTab === 'overview'"><div class="growth-overview-grid"><article class="growth-overview-card"><div class="growth-section-heading"><div><span class="eyebrow">LEARNING CATALOG</span><h2>Learning that moves with your team.</h2><p>Keep internal and provider-led programs organized with clear owners, dates, and formats.</p></div><button class="text-link" @click="trainingTab = 'catalog'">Browse catalog →</button></div><div v-if="trainingData.programs.length" class="training-program-preview"><article v-for="program in trainingData.programs.filter((entry) => entry.status === 'active').slice(0, 4)" :key="program.id"><span class="training-program-icon">✳</span><span><b>{{ program.title }}</b><small>{{ program.category }} · {{ program.delivery_mode.replace('_', ' ') }}<span v-if="program.due_date"> · {{ formatDate(program.due_date) }}</span></small></span><b class="training-preview-count">{{ program.active_enrollment_count }} assigned</b></article></div><div v-else class="growth-empty-inline"><span class="growth-empty-symbol">▤</span><b>Your catalog is ready to grow</b><p>Create a program before assigning employees.</p><button class="button button-primary" @click="openTrainingProgramForm">Create first program</button></div></article><article class="growth-overview-card"><div class="growth-section-heading"><div><span class="eyebrow">LEARNING MOMENTUM</span><h2>Progress, made practical.</h2><p>Monitor assignments and record completion when it is confirmed.</p></div><button class="text-link" @click="trainingTab = 'enrollments'">View assignments →</button></div><div class="growth-mini-stats"><span><b>{{ trainingData.meta.active_enrollments ?? 0 }}</b><small>Assigned / in progress</small></span><span><b>{{ trainingData.meta.completed_enrollments ?? 0 }}</b><small>Completions</small></span><span><b>{{ trainingData.meta.overdue_enrollments ?? 0 }}</b><small>Past due</small></span></div><button class="button button-primary" :disabled="!trainingData.programs.some((program) => program.status === 'active') || !trainingData.employees.length" @click="openTrainingEnrollmentForm">Assign learning →</button></article></div><div class="growth-boundary-note"><span>ⓘ</span><p>Assignments and completions are internal records. No attendance is inferred, certificates are not issued, and external providers are not contacted.</p><span>HR &amp; admin only</span></div></template>
+                            <template v-else-if="trainingTab === 'catalog'"><div class="training-program-grid"><article v-for="program in visibleTrainingPrograms" :key="program.id" class="training-program-card"><div class="training-program-card-top"><span class="training-program-icon">✳</span><span class="status-pill" :class="program.status === 'active' ? 'benefit-status-active' : 'status-planned'">{{ program.status }}</span></div><span class="eyebrow">{{ program.category.toUpperCase() }} <span class="dot-separator">•</span> {{ program.delivery_mode.replace('_', ' ').toUpperCase() }}</span><h3>{{ program.title }}</h3><p>{{ program.description || 'No program outline added.' }}</p><div class="training-program-meta"><span>{{ program.provider || 'Internal program' }}</span><span>{{ program.branch?.name || 'Company-wide' }}</span><span v-if="program.start_date">Starts {{ formatDate(program.start_date) }}</span><span v-if="program.due_date">Due {{ formatDate(program.due_date) }}</span></div><div class="training-capacity"><span><b>{{ program.active_enrollment_count }}</b> assigned<span v-if="program.capacity"> of {{ program.capacity }}</span></span><span>{{ program.completed_enrollment_count }} completed</span></div><div class="training-program-actions"><button v-if="!user.branch_id || program.branch_id" class="button button-soft" @click="openTrainingProgramForm(program)">⚙ Configure</button><button v-if="program.status === 'active'" class="button button-primary" :disabled="!trainingData.employees.length || (program.capacity && program.active_enrollment_count >= program.capacity)" @click="openTrainingEnrollmentForm(program)">＋ Assign employee</button></div></article><div v-if="!visibleTrainingPrograms.length" class="growth-empty-state"><span class="empty-icon">▤</span><b>{{ trainingData.programs.length ? 'No programs match your search' : 'Create your first learning program' }}</b><p>{{ trainingData.programs.length ? 'Try another title, provider, or category.' : 'Document a course or development program before making assignments.' }}</p><button v-if="!trainingData.programs.length" class="button button-primary" @click="openTrainingProgramForm">Create program</button></div></div></template>
+                            <section v-else-if="trainingTab === 'enrollments'" class="growth-review-layout training-assignment-layout"><div class="growth-review-list-panel"><div class="growth-review-list-heading"><span class="eyebrow">LEARNING REGISTER</span><b>{{ visibleTrainingEnrollments.length }} records</b></div><button v-for="enrollment in visibleTrainingEnrollments" :key="enrollment.id" class="growth-review-option" :class="{ active: selectedTrainingEnrollmentId === enrollment.id }" @click="selectedTrainingEnrollmentId = enrollment.id; trainingEnrollmentUpdateError = ''"><span class="avatar">{{ initials({ first_name: enrollment.employee_name }) }}</span><span><b>{{ enrollment.employee_name }}</b><small>{{ enrollment.employee_code }} · {{ enrollment.department || 'Team not set' }}</small><small>{{ enrollment.program?.title }}</small></span><span class="status-pill" :class="`benefit-status-${enrollment.status}`">{{ enrollment.status.replace('_', ' ') }}</span></button><div v-if="!visibleTrainingEnrollments.length" class="growth-empty-inline"><b>{{ trainingData.enrollments.length ? 'No assignments match' : 'No learning assigned yet' }}</b><p>{{ trainingData.enrollments.length ? 'Adjust the status or search filter.' : 'Select a program and employee to create the first assignment.' }}</p><button v-if="!trainingData.enrollments.length && trainingData.programs.some((program) => program.status === 'active')" class="button button-primary" @click="openTrainingEnrollmentForm">Assign learning</button></div></div><article v-if="selectedTrainingEnrollment" class="growth-review-detail"><div class="growth-detail-heading"><span class="training-program-icon">✳</span><div><span class="eyebrow">{{ selectedTrainingEnrollment.program?.category }} <span class="dot-separator">•</span> {{ selectedTrainingEnrollment.program?.delivery_mode.replace('_', ' ') }}</span><h2>{{ selectedTrainingEnrollment.employee_name }}</h2><p>{{ selectedTrainingEnrollment.employee_code }} · {{ selectedTrainingEnrollment.program?.title }}</p></div><span class="status-pill" :class="`benefit-status-${selectedTrainingEnrollment.status}`">{{ selectedTrainingEnrollment.status.replace('_', ' ') }}</span></div><div class="training-detail-facts"><span><small>PROVIDER</small><b>{{ selectedTrainingEnrollment.program?.provider || 'Internal program' }}</b></span><span><small>PROGRAM WINDOW</small><b>{{ selectedTrainingEnrollment.program?.start_date ? formatDate(selectedTrainingEnrollment.program.start_date) : 'Flexible' }}<span v-if="selectedTrainingEnrollment.program?.due_date"> – {{ formatDate(selectedTrainingEnrollment.program.due_date) }}</span></b></span><span><small>ASSIGNED BRANCH</small><b>{{ selectedTrainingEnrollment.branch?.name || 'Company-wide' }}</b></span><span><small>COMPLETION</small><b>{{ selectedTrainingEnrollment.completed_at ? formatDate(selectedTrainingEnrollment.completed_at) : 'Not recorded' }}</b></span></div><label class="training-detail-label">Assignment status<select v-model="trainingEnrollmentDrafts[selectedTrainingEnrollment.id].status" :disabled="selectedTrainingEnrollment.status === 'completed' || selectedTrainingEnrollment.status === 'cancelled'"><option v-for="status in trainingStatusOptions(selectedTrainingEnrollment)" :key="status" :value="status">{{ status.replace('_', ' ') }}</option></select></label><label class="training-detail-label">Completion / follow-up note<textarea v-model.trim="trainingEnrollmentDrafts[selectedTrainingEnrollment.id].notes" rows="3" maxlength="2000" :disabled="selectedTrainingEnrollment.status === 'completed' || selectedTrainingEnrollment.status === 'cancelled'" placeholder="Record a verified completion or follow-up note"></textarea></label><div v-if="trainingEnrollmentUpdateError" class="inline-error" role="alert">{{ trainingEnrollmentUpdateError }}</div><div class="growth-detail-footer"><span class="payroll-draft-note">Completion is manually recorded; no certificate or attendance is inferred.</span><div class="growth-detail-actions"><button v-if="!['completed', 'cancelled'].includes(selectedTrainingEnrollment.status)" class="button button-primary" :disabled="busy || !trainingEnrollmentChanged(selectedTrainingEnrollment)" @click="saveTrainingEnrollment(selectedTrainingEnrollment)">Save assignment</button></div></div></article><div v-else class="growth-review-detail growth-empty-inline"><b>Select a learning assignment</b><p>Review the program details and update its recorded status.</p></div></section>
+                        </section>
+                        <div class="growth-boundary-note"><span>ⓘ</span><p>Training assignments and completion dates are manually recorded. Course delivery, attendance, credentials, accreditation, and provider integrations are not automated.</p><span>HR &amp; admin only</span></div>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">▣</span><b>Training records are restricted</b><p>Program settings, employee assignments, and completion records are available to HR and administrators only.</p></section>
+                </template>
+
                 <template v-else>
                     <section class="page-heading module-heading"><div><span class="eyebrow">{{ moduleBySlug?.area || 'WORKSPACE' }} <span class="dot-separator">•</span> MODULE OVERVIEW</span><h1>{{ moduleBySlug?.name || 'Workspace module' }}</h1><p>{{ descriptions[activeSlug] || 'A workflow module in the Northstar People roadmap.' }}</p></div><span class="status-pill" :class="moduleBySlug?.delivery === 'Planned' ? 'status-planned' : 'status-foundation'">{{ moduleBySlug?.delivery || 'Planned' }}</span></section>
                     <section class="module-feature-grid"><article class="panel module-status-card"><span class="module-status-icon">✳</span><span class="eyebrow">DELIVERY TRACKER</span><h2>{{ moduleBySlug?.delivery === 'Planned' ? 'Planned — not yet implemented' : 'Foundation slice delivered' }}</h2><p>{{ stagedScope[activeSlug] || 'This module is in the approved enterprise scope. It will be delivered in a later increment with persisted data, authorization, and workflow tests.' }}</p><div class="module-divider"></div><div class="module-meta"><span>DATA STATUS</span><b>{{ moduleBySlug?.delivery === 'Planned' ? 'No workflow data is simulated' : 'Company-scoped foundation' }}</b></div><div class="module-meta"><span>INTEGRATIONS</span><b>Not connected</b></div></article><article class="panel roadmap-list"><span class="eyebrow">NEXT DELIVERY INCREMENTS</span><h2>From foundation to full workflow</h2><div class="roadmap-item"><span class="roadmap-index">01</span><span><b>People & organization</b><small>Profiles, document expiry, recruiting, onboarding, and org structure</small></span><span class="status-pill status-planned">Next</span></div><div class="roadmap-item"><span class="roadmap-index">02</span><span><b>Time & absence</b><small>Roster rules, holidays, corrections, overtime, and leave policies</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">03</span><span><b>Compensation & finance</b><small>Payroll controls, settlement, benefits, loans, expenses, and WPS exports</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">04</span><span><b>Growth, compliance & integrations</b><small>Performance, training, employee relations, advanced planning, and ERP contracts</small></span><span class="status-pill status-planned">Planned</span></div><div class="integration-note"><span>ⓘ</span><p>External providers, banking, biometrics, and ERP connections remain disabled until authorized credentials, privacy review, and a test environment are available.</p></div></article></section>
@@ -3400,6 +3943,18 @@ onUnmounted(() => {
                 <p v-else>All checklist items are complete. This will close the onboarding journey for {{ fullName(selectedLifecycleCase.employee) }}.</p>
                 <label v-if="selectedLifecycleCase.type === 'offboarding'" class="lifecycle-confirm-check"><input v-model="lifecycleCloseAcknowledged" type="checkbox" required><span>I reviewed the completed clearances and confirm the employee should be marked inactive.</span></label>
                 <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="lifecycleCloseDialog?.close()">Go back</button><button type="submit" class="button button-primary" :disabled="busy || (selectedLifecycleCase.type === 'offboarding' && !lifecycleCloseAcknowledged)">{{ selectedLifecycleCase.type === 'offboarding' ? 'Confirm exit' : 'Complete journey' }}</button></div>
+            </form>
+        </dialog>
+        <dialog v-if="trainingTransitionOpen && pendingTrainingTransition" ref="trainingTransitionDialog" class="recruitment-hire-dialog" role="alertdialog" aria-modal="true" aria-labelledby="training-transition-title" @close="trainingTransitionOpen = false; pendingTrainingTransition = null">
+            <form class="recruitment-hire-form" @submit.prevent="confirmTrainingEnrollmentTransition">
+                <span class="recruitment-hire-symbol">{{ trainingEnrollmentDrafts[pendingTrainingTransition.id]?.status === 'completed' ? '✓' : '−' }}</span>
+                <span class="eyebrow">FINAL TRAINING STATUS</span>
+                <h2 id="training-transition-title">{{ trainingEnrollmentDrafts[pendingTrainingTransition.id]?.status === 'completed' ? 'Record completion?' : 'Cancel this assignment?' }}</h2>
+                <p>{{ pendingTrainingTransition.employee_name }} · {{ pendingTrainingTransition.program?.title }}. This status is final and cannot be changed later. Confirm only a manually verified completion or cancellation.</p>
+                <div class="recruitment-hire-actions">
+                    <button type="button" class="button button-soft" @click="trainingTransitionDialog?.close()">Go back</button>
+                    <button type="submit" class="button button-primary" :class="{ 'growth-transition-confirm': trainingEnrollmentDrafts[pendingTrainingTransition.id]?.status === 'cancelled' }" :disabled="busy">{{ trainingEnrollmentDrafts[pendingTrainingTransition.id]?.status === 'completed' ? 'Confirm completion' : 'Confirm cancellation' }}</button>
+                </div>
             </form>
         </dialog>
     </div>

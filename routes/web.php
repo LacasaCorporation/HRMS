@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BenefitsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\GrowthController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LifecycleController;
 use App\Http\Controllers\ModuleCatalogController;
@@ -72,6 +73,17 @@ Route::prefix('api')->group(function () {
         Route::put('/separations/settlements/{settlement}/items', [SeparationController::class, 'updateItems']);
         Route::post('/separations/settlements/{settlement}/submit', [SeparationController::class, 'submit']);
         Route::post('/separations/settlements/{settlement}/review', [SeparationController::class, 'review']);
+        Route::get('/performance', [GrowthController::class, 'performanceIndex']);
+        Route::post('/performance/cycles', [GrowthController::class, 'storePerformanceCycle']);
+        Route::patch('/performance/cycles/{cycle}/status', [GrowthController::class, 'updatePerformanceCycleStatus']);
+        Route::patch('/performance/reviews/{review}', [GrowthController::class, 'updatePerformanceReview']);
+        Route::post('/performance/reviews/{review}/submit', [GrowthController::class, 'submitPerformanceReview']);
+        Route::post('/performance/reviews/{review}/review', [GrowthController::class, 'reviewPerformanceReview']);
+        Route::get('/training', [GrowthController::class, 'trainingIndex']);
+        Route::post('/training/programs', [GrowthController::class, 'storeTrainingProgram']);
+        Route::patch('/training/programs/{program}', [GrowthController::class, 'updateTrainingProgram']);
+        Route::post('/training/enrollments', [GrowthController::class, 'storeTrainingEnrollment']);
+        Route::patch('/training/enrollments/{enrollment}', [GrowthController::class, 'updateTrainingEnrollment']);
     });
 });
 

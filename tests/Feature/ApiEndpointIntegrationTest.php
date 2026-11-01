@@ -126,6 +126,17 @@ class ApiEndpointIntegrationTest extends TestCase
             ['PUT', '/api/separations/settlements/1/items'],
             ['POST', '/api/separations/settlements/1/submit'],
             ['POST', '/api/separations/settlements/1/review'],
+            ['GET', '/api/performance'],
+            ['POST', '/api/performance/cycles'],
+            ['PATCH', '/api/performance/cycles/1/status'],
+            ['PATCH', '/api/performance/reviews/1'],
+            ['POST', '/api/performance/reviews/1/submit'],
+            ['POST', '/api/performance/reviews/1/review'],
+            ['GET', '/api/training'],
+            ['POST', '/api/training/programs'],
+            ['PATCH', '/api/training/programs/1'],
+            ['POST', '/api/training/enrollments'],
+            ['PATCH', '/api/training/enrollments/1'],
             ['GET', '/api/leave'],
             ['POST', '/api/leave'],
             ['POST', '/api/leave/1/review'],
@@ -156,7 +167,9 @@ class ApiEndpointIntegrationTest extends TestCase
             ->assertJsonPath('modules.21.delivery', 'Foundation slice')
             ->assertJsonFragment(['slug' => 'shifts-rosters', 'delivery' => 'Foundation slice'])
             ->assertJsonFragment(['slug' => 'benefits', 'delivery' => 'Foundation slice'])
-            ->assertJsonFragment(['slug' => 'separation-settlement', 'delivery' => 'Foundation slice']);
+            ->assertJsonFragment(['slug' => 'separation-settlement', 'delivery' => 'Foundation slice'])
+            ->assertJsonFragment(['slug' => 'performance', 'delivery' => 'Foundation slice'])
+            ->assertJsonFragment(['slug' => 'training', 'delivery' => 'Foundation slice']);
         $this->getJson('/api/dashboard')
             ->assertOk()
             ->assertJsonPath('metrics.employees', 2);
@@ -182,6 +195,16 @@ class ApiEndpointIntegrationTest extends TestCase
             ->assertOk()
             ->assertJsonCount(0, 'assignments')
             ->assertJsonCount(0, 'patterns');
+        $this->getJson('/api/performance')
+            ->assertOk()
+            ->assertJsonCount(0, 'cycles')
+            ->assertJsonCount(0, 'reviews')
+            ->assertJsonCount(2, 'employees');
+        $this->getJson('/api/training')
+            ->assertOk()
+            ->assertJsonCount(0, 'programs')
+            ->assertJsonCount(0, 'enrollments')
+            ->assertJsonCount(2, 'employees');
 
         $this->postJson('/api/employees', [
             'employee_code' => 'INT-INVALID',
