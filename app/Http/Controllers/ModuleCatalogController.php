@@ -9,7 +9,7 @@ class ModuleCatalogController extends Controller
 {
     public function __invoke(Request $request): JsonResponse
     {
-        $foundation = ['dashboard', 'employees', 'organization', 'recruitment', 'onboarding-offboarding', 'attendance', 'leave', 'shifts-rosters', 'payroll', 'benefits', 'separation-settlement', 'performance', 'training', 'employee-self-service', 'manager-self-service', 'expenses', 'loans-advances', 'travel'];
+        $foundation = ['dashboard', 'employees', 'organization', 'recruitment', 'onboarding-offboarding', 'attendance', 'leave', 'shifts-rosters', 'payroll', 'benefits', 'separation-settlement', 'performance', 'training', 'employee-self-service', 'manager-self-service', 'expenses', 'loans-advances', 'travel', 'disciplinary'];
         $modules = collect(config('hrm.modules'))->map(function (array $module) use ($foundation) {
             $module['delivery'] = in_array($module['slug'], $foundation, true) ? 'Foundation slice' : 'Planned';
 

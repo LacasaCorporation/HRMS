@@ -73,6 +73,19 @@ const travelReportError = ref('');
 const travelReconcileId = ref(null);
 const travelReconcileNote = ref('');
 const travelReconcileError = ref('');
+const disciplinaryData = ref({
+    cases: [], employees: [], investigators: [],
+    meta: { total: 0, open: 0, under_review: 0, resolved: 0, limit: 300, truncated: false },
+});
+const disciplinaryTab = ref('all');
+const disciplinarySearch = ref('');
+const disciplinaryFormOpen = ref(false);
+const disciplinaryForm = ref({ employee_id: '', case_type: 'conduct', incident_date: localDateInput(new Date()), summary: '' });
+const disciplinaryFormError = ref('');
+const disciplinaryActionId = ref(null);
+const disciplinaryActionType = ref('');
+const disciplinaryActionForm = ref({ investigator_id: '', investigation_notes: '', employee_response: '', resolution_summary: '' });
+const disciplinaryActionError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -465,6 +478,20 @@ const travelApprovedTotals = computed(() => {
     return [...totals.entries()]
         .map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
         .join(' · ') || '—';
+});
+const filteredDisciplinaryCases = computed(() => {
+    const query = disciplinarySearch.value.trim().toLowerCase();
+    return disciplinaryData.value.cases.filter((caseItem) => {
+        const matchesTab = disciplinaryTab.value === 'all'
+            || (disciplinaryTab.value === 'open' && caseItem.status === 'open')
+            || (disciplinaryTab.value === 'under_review' && caseItem.status === 'under_review')
+            || (disciplinaryTab.value === 'resolved' && caseItem.status === 'resolved');
+        const matchesSearch = !query || [
+            caseItem.employee?.first_name, caseItem.employee?.last_name, caseItem.employee?.employee_code,
+            caseItem.case_type, caseItem.status, caseItem.summary, caseItem.investigator?.name,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesTab && matchesSearch;
+    });
 });
 const selectedManagerRequest = computed(() => managerTeamLeaveRequests.value
     .find((request) => request.id === managerReviewRequestId.value) || null);
@@ -902,6 +929,15 @@ async function loadActive() {
         if (activeSlug.value === 'expenses') expenseData.value = await api('/expenses');
         if (activeSlug.value === 'loans-advances') loanData.value = await api('/loans-advances');
         if (activeSlug.value === 'travel') travelData.value = await api('/travel');
+        if (activeSlug.value === 'disciplinary' && canManageOrganization.value) {
+            disciplinaryData.value = await api('/disciplinary');
+            if (!disciplinaryForm.value.employee_id && disciplinaryData.value.employees.length) {
+                disciplinaryForm.value.employee_id = String(disciplinaryData.value.employees[0].id);
+            }
+            if (!disciplinaryActionForm.value.investigator_id && disciplinaryData.value.investigators.length) {
+                disciplinaryActionForm.value.investigator_id = String(disciplinaryData.value.investigators[0].id);
+            }
+        }
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -3157,6 +3193,95 @@ async function submitTravelReconcile(trip) {
     }
 }
 
+function disciplinaryTypeLabel(type) {
+    return {
+        conduct: 'Conduct',
+        attendance: 'Attendance',
+        policy: 'Policy concern',
+        grievance: 'Grievance',
+        other: 'Other',
+    }[type] || String(type || '').replaceAll('_', ' ');
+}
+
+function disciplinaryStatusLabel(status) {
+    return {
+        open: 'Open',
+        under_review: 'Under investigation',
+        resolved: 'Resolved',
+    }[status] || String(status || '').replaceAll('_', ' ');
+}
+
+async function submitDisciplinaryCase() {
+    disciplinaryFormError.value = '';
+    busy.value = true;
+    try {
+        await api('/disciplinary/cases', { method: 'POST', body: JSON.stringify(disciplinaryForm.value) });
+        disciplinaryForm.value = {
+            employee_id: disciplinaryData.value.employees[0]?.id ? String(disciplinaryData.value.employees[0].id) : '',
+            case_type: 'conduct',
+            incident_date: localDateInput(new Date()),
+            summary: '',
+        };
+        disciplinaryFormOpen.value = false;
+        disciplinaryTab.value = 'all';
+        message('Restricted HR case created. No finding or employment action was made.');
+        await loadActive();
+    } catch (requestError) {
+        disciplinaryFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openDisciplinaryAction(caseItem, action) {
+    disciplinaryActionId.value = caseItem.id;
+    disciplinaryActionType.value = action;
+    disciplinaryActionForm.value = {
+        investigator_id: String(caseItem.investigator_id || user.value.id),
+        investigation_notes: '',
+        employee_response: caseItem.employee_response || '',
+        resolution_summary: '',
+    };
+    disciplinaryActionError.value = '';
+}
+
+async function submitDisciplinaryAction(caseItem) {
+    disciplinaryActionError.value = '';
+    busy.value = true;
+    const action = disciplinaryActionType.value;
+    const endpoint = {
+        investigate: 'start-review',
+        response: 'employee-response',
+        resolve: 'resolve',
+    }[action];
+    const body = action === 'investigate'
+        ? {
+            investigator_id: disciplinaryActionForm.value.investigator_id,
+            investigation_notes: disciplinaryActionForm.value.investigation_notes,
+        }
+        : action === 'response'
+            ? { employee_response: disciplinaryActionForm.value.employee_response }
+            : { resolution_summary: disciplinaryActionForm.value.resolution_summary };
+    try {
+        await api(`/disciplinary/cases/${caseItem.id}/${endpoint}`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        disciplinaryActionId.value = null;
+        disciplinaryActionType.value = '';
+        message(action === 'resolve'
+            ? 'Case marked resolved with the recorded manual summary.'
+            : action === 'response'
+                ? 'Employee response summary recorded.'
+                : 'Investigation started and assigned.');
+        await loadActive();
+    } catch (requestError) {
+        disciplinaryActionError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -4802,6 +4927,74 @@ onUnmounted(() => {
                         <div v-else class="expense-empty-state"><span class="empty-icon">↗</span><b>{{ travelTab === 'review' ? 'Your travel review queue is clear.' : travelTab === 'reports' ? 'No post-trip reports need attention.' : travelSearch || travelStatusFilter !== 'all' ? 'No trips match these filters.' : 'No travel requests yet.' }}</b><p>{{ travelTab === 'review' ? 'Pending requests from your review scope will appear here.' : travelTab === 'reports' ? 'Approved travelers can submit a report after their return date.' : 'Create a request when business travel needs approval.' }}</p><button v-if="canRequestTravel && travelTab === 'all' && !travelFormOpen" class="button button-primary" @click="travelFormOpen = true">Plan a business trip</button><button v-else-if="travelSearch || travelStatusFilter !== 'all'" class="button button-soft" @click="travelSearch = ''; travelStatusFilter = 'all'">Clear filters</button></div>
                     </section>
                     <p class="expense-boundary-note"><span>ⓘ</span> This is a manually maintained internal travel record. It does not make bookings, arrange visas, determine allowances, or initiate reimbursement or payments.</p>
+                </template>
+
+                <template v-else-if="activeSlug === 'disciplinary'">
+                    <template v-if="canManageOrganization">
+                        <section class="page-heading disciplinary-heading">
+                            <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> RESTRICTED HR</span><h1>Employee relations, handled with care.</h1><p>Keep scoped case intake, investigation ownership, employee response, and documented resolution in one confidential workspace.</p></div>
+                            <button class="button button-primary" @click="disciplinaryFormOpen = !disciplinaryFormOpen">{{ disciplinaryFormOpen ? 'Close intake form' : '＋ Open a case' }}</button>
+                        </section>
+                        <section class="growth-metrics disciplinary-metrics" aria-label="Restricted case summary">
+                            <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">CASES IN SCOPE</span><b>{{ disciplinaryData.meta.total }}</b><small>Restricted to scoped HR and admins</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">OPEN</span><b>{{ disciplinaryData.meta.open }}</b><small>Awaiting an assigned investigation</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-complete">⌕</span><div><span class="eyebrow">UNDER INVESTIGATION</span><b>{{ disciplinaryData.meta.under_review }}</b><small>Response and review in progress</small></div></article>
+                            <article><span class="growth-metric-icon">✓</span><div><span class="eyebrow">RESOLVED</span><b>{{ disciplinaryData.meta.resolved }}</b><small>Manual record; no automated finding</small></div></article>
+                        </section>
+                        <section class="panel disciplinary-workspace">
+                            <section v-if="disciplinaryFormOpen" class="growth-form disciplinary-form">
+                                <div class="growth-form-heading"><div><span class="eyebrow">CONFIDENTIAL CASE INTAKE</span><h2>Record a reported concern.</h2><p>Capture a neutral summary of reported facts. Creating a case does not establish a finding or authorize employment action.</p></div><button type="button" class="icon-button" aria-label="Close case intake form" @click="disciplinaryFormOpen = false; disciplinaryFormError = ''">×</button></div>
+                                <form class="growth-form-grid" @submit.prevent="submitDisciplinaryCase">
+                                    <label>Employee<select v-model="disciplinaryForm.employee_id" required><option value="" disabled>Select employee</option><option v-for="employee in disciplinaryData.employees" :key="employee.id" :value="String(employee.id)">{{ employee.first_name }} {{ employee.last_name }} · {{ employee.employee_code }}</option></select></label>
+                                    <label>Concern category<select v-model="disciplinaryForm.case_type" required><option value="conduct">Conduct</option><option value="attendance">Attendance</option><option value="policy">Policy concern</option><option value="grievance">Grievance</option><option value="other">Other</option></select></label>
+                                    <label>Incident date<input v-model="disciplinaryForm.incident_date" type="date" :max="localDateInput(new Date())" required></label>
+                                    <label class="growth-field-wide">Reported concern summary<textarea v-model.trim="disciplinaryForm.summary" rows="4" maxlength="4000" required placeholder="Record the reported facts, source, and relevant context without drawing a conclusion"></textarea></label>
+                                    <div v-if="disciplinaryFormError" class="inline-error growth-field-wide" role="alert">{{ disciplinaryFormError }}</div>
+                                    <div class="growth-form-footer growth-field-wide"><span>Do not store identity documents, medical details, privileged communications, or evidence files here.</span><div><button type="button" class="button button-soft" @click="disciplinaryFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Create restricted case' }}</button></div></div>
+                                </form>
+                            </section>
+                            <div class="disciplinary-toolbar">
+                                <nav class="growth-tabs" aria-label="Restricted case views">
+                                    <button :class="{ active: disciplinaryTab === 'all' }" @click="disciplinaryTab = 'all'">All cases <span>{{ disciplinaryData.meta.total }}</span></button>
+                                    <button :class="{ active: disciplinaryTab === 'open' }" @click="disciplinaryTab = 'open'">Open <span>{{ disciplinaryData.meta.open }}</span></button>
+                                    <button :class="{ active: disciplinaryTab === 'under_review' }" @click="disciplinaryTab = 'under_review'">Under investigation <span>{{ disciplinaryData.meta.under_review }}</span></button>
+                                    <button :class="{ active: disciplinaryTab === 'resolved' }" @click="disciplinaryTab = 'resolved'">Resolved <span>{{ disciplinaryData.meta.resolved }}</span></button>
+                                </nav>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="disciplinarySearch" aria-label="Search restricted cases" placeholder="Search employee, category, or summary"></label>
+                            </div>
+                            <div v-if="disciplinaryData.meta.truncated" class="expense-truncation-note">Showing the latest {{ disciplinaryData.meta.limit }} cases in your access scope.</div>
+                            <div v-if="filteredDisciplinaryCases.length" class="disciplinary-list">
+                                <article v-for="caseItem in filteredDisciplinaryCases" :key="caseItem.id" class="disciplinary-card">
+                                    <div class="disciplinary-card-header">
+                                        <div><span class="eyebrow">CASE #{{ caseItem.id }} <span class="dot-separator">•</span> {{ disciplinaryTypeLabel(caseItem.case_type) }}</span><h2>{{ caseItem.employee?.first_name }} {{ caseItem.employee?.last_name }}</h2><p>{{ caseItem.employee?.employee_code }}<template v-if="caseItem.employee?.department"> · {{ caseItem.employee.department }}</template> · Incident {{ formatDate(caseItem.incident_date) }}</p></div>
+                                        <span class="self-service-status-pill" :class="caseItem.status === 'resolved' ? 'self-service-status-approved' : caseItem.status === 'open' ? 'self-service-status-pending' : 'self-service-status-pending'">{{ disciplinaryStatusLabel(caseItem.status) }}</span>
+                                    </div>
+                                    <p class="disciplinary-summary">{{ caseItem.summary }}</p>
+                                    <div class="disciplinary-owner"><span>Opened by <b>{{ caseItem.creator?.name || 'HR' }}</b></span><span v-if="caseItem.investigator">Investigator <b>{{ caseItem.investigator.name }}</b></span><span v-if="caseItem.resolver">Resolved by <b>{{ caseItem.resolver.name }}</b> · {{ formatDate(caseItem.resolved_at) }}</span></div>
+                                    <section v-if="caseItem.investigation_notes || caseItem.employee_response || caseItem.resolution_summary" class="disciplinary-records">
+                                        <div v-if="caseItem.investigation_notes"><span class="eyebrow">INVESTIGATION NOTES</span><p>{{ caseItem.investigation_notes }}</p></div>
+                                        <div v-if="caseItem.employee_response"><span class="eyebrow">EMPLOYEE RESPONSE SUMMARY</span><p>{{ caseItem.employee_response }}</p><small v-if="caseItem.response_recorded_at">Recorded {{ formatDate(caseItem.response_recorded_at) }}</small></div>
+                                        <div v-if="caseItem.resolution_summary"><span class="eyebrow">DOCUMENTED RESOLUTION</span><p>{{ caseItem.resolution_summary }}</p></div>
+                                    </section>
+                                    <div v-if="caseItem.status === 'open'" class="disciplinary-actions"><button class="button button-primary" :disabled="busy" @click="openDisciplinaryAction(caseItem, 'investigate')">Assign &amp; start investigation</button></div>
+                                    <div v-else-if="caseItem.status === 'under_review'" class="disciplinary-actions"><button class="button button-soft" :disabled="busy" @click="openDisciplinaryAction(caseItem, 'response')">{{ caseItem.employee_response ? 'Update response summary' : 'Record employee response' }}</button><button class="button button-primary" :disabled="busy" @click="openDisciplinaryAction(caseItem, 'resolve')">Document resolution</button></div>
+                                    <form v-if="disciplinaryActionId === caseItem.id" class="disciplinary-action-form" @submit.prevent="submitDisciplinaryAction(caseItem)">
+                                        <template v-if="disciplinaryActionType === 'investigate'">
+                                            <label>Assigned investigator<select v-model="disciplinaryActionForm.investigator_id" required><option v-for="investigator in disciplinaryData.investigators" :key="investigator.id" :value="String(investigator.id)">{{ investigator.name }} · {{ investigator.role }}</option></select></label>
+                                            <label>Initial investigation notes<textarea v-model.trim="disciplinaryActionForm.investigation_notes" rows="3" maxlength="4000" placeholder="Outline the review steps or factual questions to follow up"></textarea></label>
+                                        </template>
+                                        <label v-else-if="disciplinaryActionType === 'response'">Employee response summary, as received<textarea v-model.trim="disciplinaryActionForm.employee_response" rows="4" maxlength="4000" required placeholder="Record the employee's response neutrally and accurately"></textarea></label>
+                                        <label v-else>Resolution summary<textarea v-model.trim="disciplinaryActionForm.resolution_summary" rows="4" maxlength="4000" required placeholder="Document the manual review outcome and any agreed next steps"></textarea></label>
+                                        <div v-if="disciplinaryActionError" class="inline-error" role="alert">{{ disciplinaryActionError }}</div>
+                                        <div class="disciplinary-action-footer"><span>Outcomes are entered manually; the system makes no findings or recommendations.</span><div><button type="button" class="button button-soft" @click="disciplinaryActionId = null; disciplinaryActionError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : disciplinaryActionType === 'investigate' ? 'Start investigation' : disciplinaryActionType === 'response' ? 'Save response summary' : 'Resolve case' }}</button></div></div>
+                                    </form>
+                                </article>
+                            </div>
+                            <div v-else class="expense-empty-state"><span class="empty-icon">▤</span><b>{{ disciplinarySearch ? 'No cases match this search.' : disciplinaryData.meta.total ? 'No cases in this view.' : 'No restricted cases yet.' }}</b><p>{{ disciplinarySearch ? 'Try another employee, category, or summary term.' : 'Open a restricted case to begin documenting a reported concern.' }}</p><button v-if="!disciplinarySearch && !disciplinaryFormOpen" class="button button-primary" @click="disciplinaryFormOpen = true">Open a case</button><button v-else-if="disciplinarySearch" class="button button-soft" @click="disciplinarySearch = ''">Clear search</button></div>
+                        </section>
+                        <p class="expense-boundary-note"><span>ⓘ</span> This restricted tracker is not a legal process, finding, sanction, or termination tool. Use approved company procedures and applicable legal guidance; manage retention and employee access outside this foundation.</p>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted HR workspace</b><p>Disciplinary case records are available only to HR and administrator accounts within their company or branch scope.</p></section>
                 </template>
 
                 <template v-else>

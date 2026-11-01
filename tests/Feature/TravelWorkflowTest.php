@@ -128,9 +128,12 @@ class TravelWorkflowTest extends TestCase
         ])->assertOk()
             ->assertJsonPath('trip.status', 'report_submitted')
             ->assertJsonPath('trip.actual_total', '425.00')
-            ->assertJsonPath('trip.can_reconcile', true);
+            ->assertJsonPath('trip.can_reconcile', false);
 
-        $this->actingAs($hrUser)->postJson("/api/travel/{$trip->id}/reconcile", [
+        $this->actingAs($hrUser)->getJson('/api/travel')
+            ->assertOk()
+            ->assertJsonFragment(['can_reconcile' => true]);
+        $this->postJson("/api/travel/{$trip->id}/reconcile", [
             'reconciliation_note' => 'Reviewed the explanation and actual total against the approved ceiling.',
         ])->assertOk()
             ->assertJsonPath('trip.status', 'reconciled')
