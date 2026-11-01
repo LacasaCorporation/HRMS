@@ -1255,6 +1255,61 @@ textarea { resize: vertical; }
     .self-service-form-footer .button { width: 100%; }
     .self-service-unlinked { margin: 12px 0; padding: 16px; }
 }
+.manager-service-heading h1, .manager-service-team-panel h2, .manager-service-approval-panel h2, .manager-service-attendance-panel h2 { text-wrap: balance; }
+.manager-service-heading p, .manager-service-team-panel p, .manager-service-approval-panel p, .manager-service-attendance-panel p { text-wrap: pretty; }
+.manager-service-heading { align-items: center; }
+.manager-service-metrics .self-service-metric-icon { background: #e8f4ee; color: #348167; }
+.manager-service-overview-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px; margin-bottom: 12px; }
+.manager-service-team-list, .manager-service-pending-list { display: grid; }
+.manager-service-team-list > article, .manager-service-pending-list > article { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px 0; border-top: 1px solid #eff2f0; }
+.manager-service-person { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.manager-service-person b { overflow: hidden; color: #40534a; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.manager-service-person small { overflow: hidden; color: #829087; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.manager-service-team-list .self-service-status-pill { max-width: 88px; text-align: center; }
+.manager-service-pending-copy { display: grid; min-width: 0; flex: 1; gap: 4px; }
+.manager-service-pending-copy b { overflow: hidden; color: #40534a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.manager-service-pending-copy small { overflow: hidden; color: #829087; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.manager-service-review-button { min-height: 28px; padding: 0 9px; font-size: 8px; }
+.manager-service-attendance-panel { margin-bottom: 12px; }
+.manager-service-attendance-list { display: grid; }
+.manager-service-attendance-list > div { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px 0; border-top: 1px solid #eff2f0; }
+.manager-service-time { color: #50665a; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.manager-service-register { min-height: 170px; }
+.manager-service-team-register { display: grid; }
+.manager-service-team-register > article { display: grid; min-width: 0; grid-template-columns: auto minmax(120px, 1fr) minmax(90px, .7fr) minmax(110px, .7fr) auto; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid #eff2f0; }
+.manager-service-team-department { overflow: hidden; color: #718078; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.manager-service-team-register > article > span:nth-last-child(2) small, .manager-service-team-register > article > span:nth-last-child(2) b { display: block; }
+.manager-service-team-register > article > span:nth-last-child(2) small { color: #8a9690; font-size: 7px; }
+.manager-service-team-status { margin-top: 4px; color: #596961; font-size: 8px; font-weight: 600; }
+.manager-service-leave-list { display: grid; }
+.manager-service-leave-list > article { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px 0; border-top: 1px solid #eff2f0; }
+.manager-service-leave-list .manager-service-pending-copy { align-self: center; }
+.manager-service-leave-list .manager-service-pending-copy small:nth-of-type(2) { white-space: normal; line-height: 1.5; }
+.manager-service-leave-list .manager-service-pending-copy small span { padding: 0 2px; color: #bdc7c1; }
+.manager-service-review-note { color: #5c7669 !important; white-space: normal !important; }
+.manager-service-request-actions { display: flex; grid-column: 2 / -1; justify-content: flex-end; gap: 7px; }
+.manager-service-request-actions .button { min-height: 30px; font-size: 8px; }
+.manager-service-attendance-table { min-width: 620px; }
+.manager-leave-review-dialog { width: min(460px, calc(100vw - 28px)); }
+.manager-review-check { display: flex; align-items: flex-start; gap: 8px; color: #607066; font-size: 9px; line-height: 1.5; }
+.manager-review-check input { flex: 0 0 auto; margin: 2px 0 0; }
+@media (max-width: 1100px) {
+    .manager-service-overview-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+    .manager-service-heading { align-items: flex-start; }
+    .manager-service-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .manager-service-team-register > article { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; }
+    .manager-service-team-department { grid-column: 2; grid-row: 2; }
+    .manager-service-team-register > article > span:nth-last-child(2) { grid-column: 2; grid-row: 3; }
+    .manager-service-team-register > article > .self-service-status-pill { grid-column: 3; grid-row: 1; }
+    .manager-service-leave-list > article { grid-template-columns: auto minmax(0, 1fr); gap: 9px; }
+    .manager-service-leave-list > article > .self-service-status-pill { grid-column: 2; justify-self: start; }
+    .manager-service-request-actions { grid-column: 2; justify-content: flex-start; }
+    .manager-service-request-actions .button { flex: 1; }
+    .manager-service-pending-list > article { gap: 7px; }
+    .manager-service-team-list .self-service-status-pill { max-width: 72px; font-size: 6px; }
+}
 
 .benefits-hero, .separation-hero { display: flex; min-height: 190px; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 14px; padding: 27px 30px; border: 1px solid #dce9e2; border-radius: 12px; background: #edf5f0; }
 .benefits-hero h1, .separation-hero h1 { margin: 9px 0 7px; color: #233d35; font-family: Manrope, sans-serif; font-size: clamp(24px, 2.4vw, 33px); font-weight: 700; letter-spacing: -.8px; line-height: 1.12; text-wrap: balance; }

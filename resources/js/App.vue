@@ -23,11 +23,20 @@ const leaveData = ref({ requests: [], balances: [], types: [] });
 const selfServiceData = ref({
     employee: null, balances: [], leave_requests: [], leave_types: [], attendance: [], today_attendance: null,
 });
+const managerServiceData = ref({ employees: [], leave_requests: [], attendance: [] });
 const selfServiceTab = ref('overview');
+const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
 const selfServiceProfileError = ref('');
 const selfServiceLeaveError = ref('');
 const selfServiceAttendanceError = ref('');
+const managerReviewDialog = ref(null);
+const managerReviewOpen = ref(false);
+const managerReviewRequestId = ref(null);
+const managerReviewDecision = ref('approved');
+const managerReviewNote = ref('');
+const managerReviewAcknowledged = ref(false);
+const managerReviewError = ref('');
 const organization = ref({ company: null, branches: [], departments: [], positions: [], employees: [], metrics: {} });
 const recruitment = ref({
     requisitions: [], candidates: [], departments: [], positions: [], pipeline: {}, metrics: {},
@@ -242,7 +251,7 @@ const descriptions = {
     performance: 'Goals, reviews, feedback, and documented performance plans.',
     training: 'Training needs, programs, attendance, credentials, and career development.',
     'employee-self-service': 'Your own profile contacts, attendance, and leave in one private workspace.',
-    'manager-self-service': 'Team directory, approvals, schedules, and manager requests.',
+    'manager-self-service': 'Direct-report directory, leave approvals, and attendance records.',
     expenses: 'Expense claims, receipt handling, approval, and reimbursement tracking.',
     'loans-advances': 'Applications, approvals, repayment schedules, balances, and settlement.',
     travel: 'Travel requests, itinerary, allowance rules, expenses, and settlements.',
@@ -276,7 +285,7 @@ const stagedScope = {
     performance: 'Evaluation cycles, goals, 360 feedback, and recommendations are staged.',
     training: 'Programs, provider records, attendance, certifications, and career plans are staged.',
     'employee-self-service': 'Employee-owned contacts, leave, and attendance are available. Private documents, letters, and payslips are not exposed.',
-    'manager-self-service': 'Team-scoped leave review is available. Additional team approvals, requisitions, and scheduling are staged.',
+    'manager-self-service': 'Direct-report overview, team attendance, and leave decisions are available. Scheduling and other team workflows remain staged.',
     expenses: 'Claim submission, receipt storage, approvals, and reimbursement are staged.',
     'loans-advances': 'Loan requests, repayment schedules, payroll deductions, and settlement are staged.',
     travel: 'Travel requests, policy rules, itineraries, and settlement are staged.',
@@ -318,6 +327,25 @@ const selfServiceContactComplete = computed(() => [selfServiceEmployee.value?.wo
 const selfServiceUpcomingLeave = computed(() => selfServiceData.value.leave_requests
     .filter((request) => request.status === 'approved' && request.start_date >= localDateInput(new Date()))
     .sort((left, right) => left.start_date.localeCompare(right.start_date))[0] || null);
+const managerTeam = computed(() => managerServiceData.value.employees
+    .filter((employee) => employee.manager_id === user.value?.employee?.id));
+const managerTeamIds = computed(() => new Set(managerTeam.value.map((employee) => employee.id)));
+const managerTeamLeaveRequests = computed(() => managerServiceData.value.leave_requests
+    .filter((request) => managerTeamIds.value.has(request.employee_id)));
+const managerOnLeaveToday = computed(() => managerTeamLeaveRequests.value
+    .filter((request) => request.status === 'approved'
+        && request.start_date <= localDateInput(new Date())
+        && request.end_date >= localDateInput(new Date())));
+const managerPendingLeaveRequests = computed(() => managerTeamLeaveRequests.value
+    .filter((request) => request.status === 'pending'));
+const managerTeamAttendance = computed(() => managerServiceData.value.attendance
+    .filter((entry) => managerTeamIds.value.has(entry.employee_id)));
+const managerTodayAttendance = computed(() => managerTeamAttendance.value
+    .filter((entry) => String(entry.attendance_date).slice(0, 10) === localDateInput(new Date())));
+const managerWorkingCount = computed(() => managerTodayAttendance.value
+    .filter((entry) => entry.check_in && !entry.check_out).length);
+const selectedManagerRequest = computed(() => managerTeamLeaveRequests.value
+    .find((request) => request.id === managerReviewRequestId.value) || null);
 const filteredLifecycleCases = computed(() => {
     const query = lifecycleSearch.value.trim().toLowerCase();
     return lifecycle.value.cases.filter((caseItem) => {
@@ -712,6 +740,27 @@ async function loadActive() {
             if (!selfServiceData.value.leave_types.some((type) => String(type.id) === String(leaveForm.value.leave_type_id))) {
                 leaveForm.value.leave_type_id = selfServiceData.value.leave_types[0]?.id || '';
             }
+        }
+        if (activeSlug.value === 'manager-self-service' && user.value.role === 'manager') {
+            const today = new Date();
+            const from = new Date(today);
+            from.setDate(from.getDate() - 6);
+            const [employeeResult, leaveResult, attendanceResult] = await Promise.all([
+                api('/employees?page=1'),
+                api('/leave'),
+                api(`/attendance/report?from=${localDateInput(from)}&to=${localDateInput(today)}&per_page=500`),
+            ]);
+            const [employeePages, attendancePages] = await Promise.all([
+                Promise.all(Array.from({ length: Math.max(0, employeeResult.last_page - 1) }, (_, index) =>
+                    api(`/employees?page=${index + 2}`))),
+                Promise.all(Array.from({ length: Math.max(0, attendanceResult.meta.last_page - 1) }, (_, index) =>
+                    api(`/attendance/report?from=${localDateInput(from)}&to=${localDateInput(today)}&per_page=500&page=${index + 2}`))),
+            ]);
+            managerServiceData.value = {
+                employees: [employeeResult, ...employeePages].flatMap((page) => page.data),
+                leave_requests: leaveResult.requests,
+                attendance: [attendanceResult, ...attendancePages].flatMap((page) => page.data),
+            };
         }
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
@@ -2648,6 +2697,44 @@ async function reviewLeave(request, decision) {
     }
 }
 
+function openManagerLeaveReview(request, decision) {
+    managerReviewRequestId.value = request.id;
+    managerReviewDecision.value = decision;
+    managerReviewNote.value = '';
+    managerReviewAcknowledged.value = false;
+    managerReviewError.value = '';
+    managerReviewOpen.value = true;
+}
+
+function closeManagerLeaveReview() {
+    managerReviewOpen.value = false;
+    managerReviewRequestId.value = null;
+    managerReviewAcknowledged.value = false;
+    managerReviewError.value = '';
+}
+
+async function submitManagerLeaveReview() {
+    if (!selectedManagerRequest.value) return;
+    managerReviewError.value = '';
+    busy.value = true;
+    try {
+        await api(`/leave/${selectedManagerRequest.value.id}/review`, {
+            method: 'POST',
+            body: JSON.stringify({
+                decision: managerReviewDecision.value,
+                review_note: managerReviewNote.value || null,
+            }),
+        });
+        managerReviewDialog.value?.close();
+        message(`Leave request ${managerReviewDecision.value}.`);
+        await loadActive();
+    } catch (requestError) {
+        managerReviewError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -2673,6 +2760,12 @@ watch(selectedCandidate, async (candidate) => {
     if (!candidate) return;
     await nextTick();
     if (hireDialog.value && !hireDialog.value.open) hireDialog.value.showModal();
+});
+
+watch(managerReviewOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (managerReviewDialog.value && !managerReviewDialog.value.open) managerReviewDialog.value.showModal();
 });
 
 watch(lifecycleCloseOpen, async (open) => {
@@ -3109,6 +3202,8 @@ onUnmounted(() => {
                             <div v-if="!filteredPositions.length" class="empty-state panel organization-empty-positions"><span class="empty-icon">⌕</span><b>No positions match your search</b><p>Try a different title, department, or position code.</p></div>
                         </section>
                     </template>
+
+
 
 
                     <template v-else>
@@ -4027,6 +4122,73 @@ onUnmounted(() => {
                     </template>
                 </template>
 
+                <template v-else-if="activeSlug === 'manager-self-service'">
+                    <template v-if="user.role === 'manager'">
+                        <section class="page-heading manager-service-heading">
+                            <div><span class="eyebrow">MY WORKSPACE <span class="dot-separator">•</span> MANAGER SELF-SERVICE</span><h1>Lead your team with clarity.</h1><p>Team attendance, leave decisions, and people details — scoped to your direct reports.</p></div>
+                            <span class="status-pill status-foundation">Manager workspace</span>
+                        </section>
+                        <nav class="self-service-tabs manager-service-tabs" aria-label="Manager self-service sections">
+                            <button :class="{ active: managerServiceTab === 'overview' }" @click="managerServiceTab = 'overview'">Overview</button>
+                            <button :class="{ active: managerServiceTab === 'team' }" @click="managerServiceTab = 'team'">My team <span>{{ managerTeam.length }}</span></button>
+                            <button :class="{ active: managerServiceTab === 'leave' }" @click="managerServiceTab = 'leave'">Leave approvals <span>{{ managerPendingLeaveRequests.length }}</span></button>
+                            <button :class="{ active: managerServiceTab === 'attendance' }" @click="managerServiceTab = 'attendance'">Attendance</button>
+                        </nav>
+
+                        <template v-if="managerServiceTab === 'overview'">
+                            <section class="self-service-metrics manager-service-metrics" aria-label="Team overview">
+                                <article class="self-service-metric"><span class="self-service-metric-icon">♙</span><div><span class="eyebrow">DIRECT REPORTS</span><b>{{ managerTeam.length }}</b><small>{{ managerTeam.filter((employee) => employee.status === 'active').length }} active employees</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">▤</span><div><span class="eyebrow">LEAVE TO REVIEW</span><b>{{ managerPendingLeaveRequests.length }}</b><small>pending decisions</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">◷</span><div><span class="eyebrow">CHECKED IN TODAY</span><b>{{ managerWorkingCount }}</b><small>recorded active punches</small></div></article>
+                                <article class="self-service-metric"><span class="self-service-metric-icon">↗</span><div><span class="eyebrow">ON APPROVED LEAVE</span><b>{{ managerOnLeaveToday.length }}</b><small>direct reports today</small></div></article>
+                            </section>
+                            <section class="manager-service-overview-grid">
+                                <article class="panel self-service-panel manager-service-team-panel">
+                                    <div class="self-service-section-title"><div><span class="eyebrow">YOUR PEOPLE</span><h2>Direct reports</h2><p>People and attendance updates in your reporting scope.</p></div><button class="text-link" @click="managerServiceTab = 'team'">View team →</button></div>
+                                    <div v-if="managerTeam.length" class="manager-service-team-list">
+                                        <article v-for="employee in managerTeam.slice(0, 5)" :key="employee.id"><span class="avatar self-service-avatar">{{ initials(employee) }}</span><span class="manager-service-person"><b>{{ fullName(employee) }}</b><small>{{ employee.job_title || 'Role not set' }} · {{ employee.department || 'Team not set' }}</small></span><span class="self-service-status-pill" :class="managerTodayAttendance.some((entry) => entry.employee_id === employee.id) ? 'self-service-status-approved' : 'self-service-status-pending'">{{ managerTodayAttendance.some((entry) => entry.employee_id === employee.id) ? 'Punch recorded' : 'No punch yet' }}</span></article>
+                                    </div>
+                                    <div v-else class="self-service-empty-inline"><b>No direct reports are linked to your profile.</b><p>Ask HR to review your reporting line. Team data stays limited to direct reports.</p></div>
+                                </article>
+                                <article class="panel self-service-panel manager-service-approval-panel">
+                                    <div class="self-service-section-title"><div><span class="eyebrow">DECISIONS AWAITING YOU</span><h2>Leave approvals</h2><p>Review requests from your direct reports.</p></div><button class="text-link" @click="managerServiceTab = 'leave'">Open queue →</button></div>
+                                    <div v-if="managerPendingLeaveRequests.length" class="manager-service-pending-list">
+                                        <article v-for="request in managerPendingLeaveRequests.slice(0, 4)" :key="request.id"><span class="avatar">{{ initials(request.employee) }}</span><span class="manager-service-pending-copy"><b>{{ fullName(request.employee) }}</b><small>{{ request.leave_type?.name }} · {{ Number(request.requested_days).toLocaleString() }} days</small><small>{{ formatDate(request.start_date) }} – {{ formatDate(request.end_date) }}</small></span><button class="button button-soft manager-service-review-button" @click="managerServiceTab = 'leave'">Review queue</button></article>
+                                    </div>
+                                    <div v-else class="self-service-empty-inline"><b>You’re all caught up.</b><p>New direct-report leave requests will appear here.</p></div>
+                                </article>
+                            </section>
+                            <section class="panel self-service-panel manager-service-attendance-panel">
+                                <div class="self-service-section-title"><div><span class="eyebrow">RECENT TEAM ATTENDANCE</span><h2>Today’s recorded punches.</h2><p>Missing punches are not marked as absences because shift schedules are not connected.</p></div><button class="text-link" @click="managerServiceTab = 'attendance'">Attendance history →</button></div>
+                                <div v-if="managerTodayAttendance.length" class="manager-service-attendance-list"><div v-for="entry in managerTodayAttendance" :key="entry.id"><span class="avatar">{{ initials(entry.employee) }}</span><span class="manager-service-person"><b>{{ fullName(entry.employee) }}</b><small>{{ entry.employee?.department || 'Team not set' }}</small></span><span class="manager-service-time">{{ formatTime(entry.check_in) }}</span><span class="self-service-status-pill" :class="entry.check_out ? 'self-service-status-approved' : 'self-service-status-pending'">{{ entry.check_out ? `Finished ${formatTime(entry.check_out)}` : 'Working' }}</span></div></div>
+                                <div v-else class="self-service-empty-inline"><b>No team punches have been recorded today.</b><p>This is a punch register, not a schedule or attendance compliance decision.</p><button class="text-link" @click="managerServiceTab = 'attendance'">Review recent attendance →</button></div>
+                            </section>
+                            <aside class="self-service-boundary-note"><span aria-hidden="true">ⓘ</span><p>Manager views and leave decisions are limited to your direct reports. Attendance indicators show saved punches only; schedules, absences, payroll, and team-wide actions are not inferred or exposed.</p></aside>
+                        </template>
+
+                        <section v-else-if="managerServiceTab === 'team'" class="panel self-service-panel manager-service-register">
+                            <div class="self-service-section-title"><div><span class="eyebrow">REPORTING SCOPE</span><h2>My team</h2><p>{{ managerTeam.length }} direct reports · personal employment details are limited to what you need to lead your team.</p></div></div>
+                            <div v-if="managerTeam.length" class="manager-service-team-register"><article v-for="employee in managerTeam" :key="employee.id"><span class="avatar self-service-avatar">{{ initials(employee) }}</span><span class="manager-service-person"><b>{{ fullName(employee) }}</b><small>{{ employee.employee_code }} · {{ employee.job_title || 'Role not set' }}</small></span><span class="manager-service-team-department">{{ employee.department || 'Team not set' }}</span><span><small>Today</small><b class="manager-service-team-status">{{ managerTodayAttendance.find((entry) => entry.employee_id === employee.id) ? 'Punch recorded' : 'No punch recorded' }}</b></span><span class="self-service-status-pill" :class="employee.status === 'active' ? 'self-service-status-approved' : 'self-service-status-pending'">{{ employee.status }}</span></article></div>
+                            <div v-else class="self-service-empty-inline"><b>Your team list is empty.</b><p>Once HR links direct reports to your employee profile, they’ll appear here.</p></div>
+                        </section>
+
+                        <section v-else-if="managerServiceTab === 'leave'" class="panel self-service-panel manager-service-register">
+                            <div class="self-service-section-title"><div><span class="eyebrow">TEAM REQUESTS</span><h2>Leave review queue</h2><p>Requests from your direct reports only. Approval records a leave decision and updates the configured balance.</p></div><span class="self-service-request-count">{{ managerPendingLeaveRequests.length }} pending</span></div>
+                            <div v-if="managerTeamLeaveRequests.length" class="manager-service-leave-list"><article v-for="request in managerTeamLeaveRequests" :key="request.id"><span class="avatar">{{ initials(request.employee) }}</span><span class="manager-service-pending-copy"><b>{{ fullName(request.employee) }} <small>· {{ request.employee?.department || 'Team' }}</small></b><small>{{ request.leave_type?.name }} · {{ Number(request.requested_days).toLocaleString() }} working days</small><small>{{ formatDate(request.start_date) }} – {{ formatDate(request.end_date) }} <span>·</span> {{ request.reason }}</small><small v-if="request.review_note" class="manager-service-review-note">Review note: {{ request.review_note }}</small></span><span class="self-service-status-pill" :class="`self-service-status-${request.status === 'rejected' ? 'rejected' : request.status}`">{{ request.status.replace('_', ' ') }}</span><div v-if="request.status === 'pending'" class="manager-service-request-actions"><button class="button button-soft" :disabled="busy" @click="openManagerLeaveReview(request, 'rejected')">Decline</button><button class="button button-primary" :disabled="busy" @click="openManagerLeaveReview(request, 'approved')">Approve</button></div></article></div>
+                            <div v-else class="self-service-empty-inline"><b>No leave requests from your team.</b><p>New requests will be listed here for your review.</p></div>
+                        </section>
+
+                        <section v-else class="panel self-service-panel manager-service-register">
+                            <div class="self-service-section-title"><div><span class="eyebrow">TEAM TIME RECORD</span><h2>Attendance register</h2><p>Recorded punches for your direct reports over the last seven days. No schedule or absence status is inferred.</p></div><span class="self-service-request-count">{{ managerTeamAttendance.length }} records</span></div>
+                            <div v-if="managerTeamAttendance.length" class="self-service-attendance-table-wrap"><table class="self-service-attendance-table manager-service-attendance-table"><thead><tr><th>Employee</th><th>Date</th><th>Check in</th><th>Check out</th><th>Record</th></tr></thead><tbody><tr v-for="entry in managerTeamAttendance" :key="entry.id"><td>{{ fullName(entry.employee) }}</td><td>{{ formatDate(entry.attendance_date) }}</td><td>{{ formatTime(entry.check_in) }}</td><td>{{ formatTime(entry.check_out) }}</td><td>{{ entry.check_out ? 'Complete' : 'In progress' }}</td></tr></tbody></table></div>
+                            <div v-else class="self-service-empty-inline"><b>No attendance entries found for the last seven days.</b><p>Only recorded entries are listed. Ask HR if you need to correct a record.</p></div>
+                        </section>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Manager workspace</b><p>This view is available to manager accounts with direct reports. Use the employee and attendance workspaces for other role-based access.</p></section>
+                </template>
+
+
+
                 <template v-else>
                     <section class="page-heading module-heading"><div><span class="eyebrow">{{ moduleBySlug?.area || 'WORKSPACE' }} <span class="dot-separator">•</span> MODULE OVERVIEW</span><h1>{{ moduleBySlug?.name || 'Workspace module' }}</h1><p>{{ descriptions[activeSlug] || 'A workflow module in the Northstar People roadmap.' }}</p></div><span class="status-pill" :class="moduleBySlug?.delivery === 'Planned' ? 'status-planned' : 'status-foundation'">{{ moduleBySlug?.delivery || 'Planned' }}</span></section>
                     <section class="module-feature-grid"><article class="panel module-status-card"><span class="module-status-icon">✳</span><span class="eyebrow">DELIVERY TRACKER</span><h2>{{ moduleBySlug?.delivery === 'Planned' ? 'Planned — not yet implemented' : 'Foundation slice delivered' }}</h2><p>{{ stagedScope[activeSlug] || 'This module is in the approved enterprise scope. It will be delivered in a later increment with persisted data, authorization, and workflow tests.' }}</p><div class="module-divider"></div><div class="module-meta"><span>DATA STATUS</span><b>{{ moduleBySlug?.delivery === 'Planned' ? 'No workflow data is simulated' : 'Company-scoped foundation' }}</b></div><div class="module-meta"><span>INTEGRATIONS</span><b>Not connected</b></div></article><article class="panel roadmap-list"><span class="eyebrow">NEXT DELIVERY INCREMENTS</span><h2>From foundation to full workflow</h2><div class="roadmap-item"><span class="roadmap-index">01</span><span><b>People & organization</b><small>Profiles, document expiry, recruiting, onboarding, and org structure</small></span><span class="status-pill status-planned">Next</span></div><div class="roadmap-item"><span class="roadmap-index">02</span><span><b>Time & absence</b><small>Roster rules, holidays, corrections, overtime, and leave policies</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">03</span><span><b>Compensation & finance</b><small>Payroll controls, settlement, benefits, loans, expenses, and WPS exports</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">04</span><span><b>Growth, compliance & integrations</b><small>Performance, training, employee relations, advanced planning, and ERP contracts</small></span><span class="status-pill status-planned">Planned</span></div><div class="integration-note"><span>ⓘ</span><p>External providers, banking, biometrics, and ERP connections remain disabled until authorized credentials, privacy review, and a test environment are available.</p></div></article></section>
@@ -4034,6 +4196,19 @@ onUnmounted(() => {
                 <footer class="page-footer"><span>Northstar People <i>•</i> Local development foundation</span><span>Synthetic records only · {{ user.company?.name }}</span></footer>
             </div>
         </main>
+        <dialog v-if="managerReviewOpen && selectedManagerRequest" ref="managerReviewDialog" class="recruitment-hire-dialog manager-leave-review-dialog" role="alertdialog" aria-modal="true" aria-labelledby="manager-leave-review-title" @close="closeManagerLeaveReview">
+            <form class="recruitment-hire-form" @submit.prevent="submitManagerLeaveReview">
+                <span class="recruitment-hire-symbol">{{ managerReviewDecision === 'approved' ? '✓' : '−' }}</span>
+                <span class="eyebrow">DIRECT-REPORT LEAVE REVIEW</span>
+                <h2 id="manager-leave-review-title">{{ managerReviewDecision === 'approved' ? 'Approve this leave request?' : 'Decline this leave request?' }}</h2>
+                <p>{{ fullName(selectedManagerRequest.employee) }} · {{ selectedManagerRequest.leave_type?.name }} · {{ Number(selectedManagerRequest.requested_days).toLocaleString() }} working days, {{ formatDate(selectedManagerRequest.start_date) }} to {{ formatDate(selectedManagerRequest.end_date) }}.</p>
+                <p v-if="managerReviewDecision === 'approved'">Approval records your decision and deducts the requested days from the configured balance. It does not notify a provider or arrange cover.</p>
+                <label>{{ managerReviewDecision === 'approved' ? 'Review note (optional)' : 'Reason for declining' }}<textarea v-model.trim="managerReviewNote" rows="3" maxlength="2000" :required="managerReviewDecision === 'rejected'" placeholder="Document your decision for the employee"></textarea></label>
+                <label v-if="managerReviewDecision === 'approved'" class="manager-review-check"><input v-model="managerReviewAcknowledged" type="checkbox" required><span>I reviewed the dates and balance, and confirm this is a leave decision for my direct report.</span></label>
+                <div v-if="managerReviewError" class="inline-error" role="alert">{{ managerReviewError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="managerReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (managerReviewDecision === 'approved' && !managerReviewAcknowledged) || (managerReviewDecision === 'rejected' && !managerReviewNote.trim())">{{ busy ? 'Saving…' : managerReviewDecision === 'approved' ? 'Confirm approval' : 'Confirm decline' }}</button></div>
+            </form>
+        </dialog>
         <dialog v-if="selectedCandidate" ref="hireDialog" class="recruitment-hire-dialog" aria-labelledby="hire-dialog-title" @close="closeHireDialog">
             <form class="recruitment-hire-form" @submit.prevent="hireCandidate">
                 <span class="recruitment-hire-symbol">✓</span>
