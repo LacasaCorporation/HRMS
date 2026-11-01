@@ -1979,3 +1979,79 @@ textarea { resize: vertical; }
     .loan-card-title { align-items: flex-start; flex-direction: column; }
     .loan-card-title h2 { max-width: 250px; }
 }
+
+.travel-heading { align-items: center; margin-bottom: 14px; }
+.travel-heading h1 { text-wrap: balance; }
+.travel-heading > .button { flex: 0 0 auto; }
+.travel-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.travel-total-value { overflow-wrap: anywhere; font-size: 15px !important; }
+.travel-workspace { overflow: hidden; }
+.travel-form { margin: 14px; }
+.travel-toolbar { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #edf1ef; }
+.travel-filters { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
+.travel-filters select { min-height: 32px; padding: 0 25px 0 9px; border: 1px solid #e1e9e3; border-radius: 6px; background: #fff; color: #5e7065; font-size: 8px; }
+.travel-list { display: grid; }
+.travel-card { display: grid; min-width: 0; gap: 10px; padding: 15px; border-bottom: 1px solid #edf1ef; }
+.travel-card:last-child { border-bottom: 0; }
+.travel-card-header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.travel-route { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.travel-route-point { display: grid; min-width: 0; gap: 4px; }
+.travel-route-point small, .travel-budget-row small { color: #87948c; font-size: 7px; font-weight: 700; }
+.travel-route-point b { overflow-wrap: anywhere; color: #344a3f; font-family: Manrope, sans-serif; font-size: 11px; }
+.travel-route-line { flex: 0 0 auto; color: #548b73; font-size: 14px; }
+.travel-trip-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; color: #839087; font-size: 8px; font-variant-numeric: tabular-nums; }
+.travel-trip-meta i { padding: 0 3px; color: #a4aea8; font-style: normal; }
+.travel-purpose { margin: 0; color: #53675c; font-size: 9px; line-height: 1.5; text-wrap: pretty; }
+.travel-itinerary { border: 1px solid #e9efea; border-radius: 7px; background: #fbfcfb; color: #5e7065; font-size: 8px; }
+.travel-itinerary summary { padding: 9px 11px; color: #486758; cursor: pointer; font-weight: 700; }
+.travel-itinerary p { margin: 0; padding: 0 11px 10px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.travel-budget-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 7px; background: #f8faf8; }
+.travel-budget-row > span { display: grid; min-width: 100px; flex: 1; gap: 4px; }
+.travel-budget-row b { color: #354a40; font-size: 9px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.travel-card-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.travel-card-actions .button { min-height: 30px; padding: 0 10px; font-size: 8px; }
+.travel-inline-form, .travel-reconcile-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; border: 1px solid #e5ece7; border-radius: 8px; background: #f8fbf8; }
+.travel-inline-form > div:first-child { grid-column: 1 / -1; }
+.travel-inline-form h3 { margin: 4px 0; color: #40564a; font-family: Manrope, sans-serif; font-size: 11px; }
+.travel-inline-form p { margin: 0; color: #7c8981; font-size: 8px; line-height: 1.5; text-wrap: pretty; }
+.travel-inline-form label, .travel-reconcile-form > label { display: grid; min-width: 0; gap: 5px; color: #68786e; font-size: 8px; font-weight: 600; }
+.travel-inline-form input, .travel-inline-form textarea, .travel-reconcile-form textarea { width: 100%; min-height: 34px; padding: 7px 8px; border: 1px solid #e2e9e4; border-radius: 6px; background: #fff; color: #40534a; font: inherit; }
+.travel-inline-form textarea, .travel-reconcile-form textarea { resize: vertical; }
+.travel-inline-wide, .travel-reconcile-form > label, .travel-reconcile-form > .inline-error, .travel-reconcile-form > .travel-inline-footer { grid-column: 1 / -1; }
+.travel-inline-footer { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 9px; color: #87938c; font-size: 7px; line-height: 1.45; }
+.travel-inline-footer > div { display: flex; flex: 0 0 auto; gap: 6px; }
+.travel-inline-footer .button { min-height: 29px; font-size: 7px; }
+.travel-report-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.travel-report-summary > div { min-width: 0; padding: 10px; border: 1px solid #e9efea; border-radius: 7px; background: #fbfcfb; }
+.travel-report-summary p { margin: 5px 0; color: #586b60; font-size: 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.travel-report-summary small { color: #89958e; font-size: 7px; }
+
+@media (max-width: 1100px) {
+    .travel-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+    .travel-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .travel-heading > .button { width: 100%; }
+    .travel-toolbar { align-items: stretch; flex-direction: column; gap: 6px; padding: 10px; }
+    .travel-toolbar .growth-tabs { min-height: 38px; overflow-x: auto; }
+    .travel-filters { width: 100%; }
+    .travel-filters select { flex: 0 0 120px; }
+    .travel-filters .growth-search { flex: 1; width: auto; }
+}
+@media (max-width: 440px) {
+    .travel-metrics { gap: 7px; }
+    .travel-metrics > article { min-height: 72px; padding: 8px; }
+    .travel-metrics .growth-metric-icon { width: 28px; height: 28px; flex-basis: 28px; }
+    .travel-total-value { font-size: 12px !important; }
+    .travel-card { padding: 12px; }
+    .travel-card-header { align-items: flex-start; flex-direction: column; }
+    .travel-route { width: 100%; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+    .travel-route-point { flex: 1; }
+    .travel-card-actions { justify-content: stretch; }
+    .travel-card-actions .button { flex: 1; }
+    .travel-inline-form, .travel-reconcile-form, .travel-report-summary { grid-template-columns: 1fr; }
+    .travel-inline-form > div:first-child, .travel-inline-wide, .travel-reconcile-form > label, .travel-reconcile-form > .inline-error, .travel-reconcile-form > .travel-inline-footer { grid-column: auto; }
+    .travel-inline-footer { align-items: stretch; flex-direction: column; }
+    .travel-inline-footer > div { width: 100%; }
+    .travel-inline-footer .button { flex: 1; }
+}

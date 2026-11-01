@@ -54,6 +54,25 @@ const loanReviewError = ref('');
 const loanRepaymentInstallmentId = ref(null);
 const loanRepaymentForm = ref({ amount: '', recorded_date: localDateInput(new Date()), reference: '' });
 const loanRepaymentError = ref('');
+const travelData = ref({ trips: [], meta: { total: 0, pending: 0, approved: 0, report_submitted: 0, reconciled: 0, truncated: false, can_request: false } });
+const travelTab = ref('all');
+const travelSearch = ref('');
+const travelStatusFilter = ref('all');
+const travelFormOpen = ref(false);
+const travelForm = ref({ origin: '', destination: '', purpose: '', departure_date: '', return_date: '', estimated_budget: '', itinerary_notes: '' });
+const travelFormError = ref('');
+const travelReviewDialog = ref(null);
+const travelReviewOpen = ref(false);
+const travelReviewId = ref(null);
+const travelReviewDecision = ref('approve');
+const travelReviewForm = ref({ approved_budget: '', review_note: '' });
+const travelReviewError = ref('');
+const travelReportId = ref(null);
+const travelReportForm = ref({ actual_total: '', post_trip_note: '' });
+const travelReportError = ref('');
+const travelReconcileId = ref(null);
+const travelReconcileNote = ref('');
+const travelReconcileError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -284,7 +303,7 @@ const descriptions = {
     'manager-self-service': 'Direct-report directory, leave approvals, and attendance records.',
     expenses: 'Submit expense claims with receipts, review scoped requests, and keep approval history in one place.',
     'loans-advances': 'Request an advance, review principal-only repayment schedules, and reconcile repayments recorded outside the app.',
-    travel: 'Travel requests, itinerary, allowance rules, expenses, and settlements.',
+    travel: 'Submit business travel requests, record itinerary details, and reconcile post-trip reports.',
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
     'health-safety': 'Safety incidents, risk assessments, inspections, PPE, and follow-up actions.',
     'assets-uniforms': 'Assignment, handover, return, condition, uniforms, and PPE records.',
@@ -318,7 +337,7 @@ const stagedScope = {
     'manager-self-service': 'Direct-report overview, team attendance, and leave decisions are available. Scheduling and other team workflows remain staged.',
     expenses: 'Employee claim submission, private receipt downloads, and direct-report or HR review are available. Approval does not trigger reimbursement or payment.',
     'loans-advances': 'Employee applications, scoped approvals, equal-principal schedules, and HR/admin repayment reconciliation are available. No interest, disbursement, payroll deduction, or collection is initiated.',
-    travel: 'Travel requests, policy rules, itineraries, and settlement are staged.',
+    travel: 'Travel requests, manager/HR decisions, itinerary notes, approved budget ceilings, and manual post-trip report reconciliation are available. No booking or reimbursement is initiated.',
     disciplinary: 'Restricted case-management workflows are staged.',
     'health-safety': 'Incident, risk, medical fitness, and action-management workflows are staged.',
     'assets-uniforms': 'Assignments, returns, uniform records, and ERP boundaries are staged.',
@@ -413,6 +432,35 @@ const loanOutstandingTotals = computed(() => {
     loanData.value.loans.filter((loan) => ['approved', 'repaid'].includes(loan.status)).forEach((loan) => {
         const currency = loan.currency || '—';
         totals.set(currency, (totals.get(currency) || 0) + Number(loan.outstanding_amount || 0));
+    });
+    return [...totals.entries()]
+        .map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+        .join(' · ') || '—';
+});
+const canRequestTravel = computed(() => Boolean(travelData.value.meta.can_request));
+const travelReviewQueue = computed(() => travelData.value.trips.filter((trip) => trip.can_review));
+const travelReports = computed(() => travelData.value.trips.filter((trip) =>
+    trip.can_submit_report || trip.can_reconcile || ['report_submitted', 'reconciled'].includes(trip.status),
+));
+const selectedTravelTrip = computed(() => travelData.value.trips.find((trip) => trip.id === travelReviewId.value) || null);
+const visibleTravelTrips = computed(() => {
+    const query = travelSearch.value.trim().toLowerCase();
+    return travelData.value.trips.filter((trip) => {
+        const matchesTab = travelTab.value === 'all'
+            || (travelTab.value === 'review' && trip.can_review)
+            || (travelTab.value === 'reports' && travelReports.value.includes(trip));
+        const matchesStatus = travelStatusFilter.value === 'all' || trip.status === travelStatusFilter.value;
+        const matchesSearch = !query || [
+            trip.employee_name, trip.employee_code, trip.origin, trip.destination, trip.purpose, trip.status,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesTab && matchesStatus && matchesSearch;
+    });
+});
+const travelApprovedTotals = computed(() => {
+    const totals = new Map();
+    travelData.value.trips.filter((trip) => trip.approved_budget !== null).forEach((trip) => {
+        const currency = trip.currency || '—';
+        totals.set(currency, (totals.get(currency) || 0) + Number(trip.approved_budget));
     });
     return [...totals.entries()]
         .map(([currency, amount]) => `${currency} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
@@ -637,6 +685,11 @@ watch(loanReviewOpen, async (open) => {
     await nextTick();
     if (loanReviewDialog.value && !loanReviewDialog.value.open) loanReviewDialog.value.showModal();
 });
+watch(travelReviewOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (travelReviewDialog.value && !travelReviewDialog.value.open) travelReviewDialog.value.showModal();
+});
 watch([() => performanceCycleForm.value.branch_id, performanceCycleEmployees], () => {
     const eligibleIds = new Set(performanceCycleEmployees.value.map((employee) => employee.id));
     performanceCycleForm.value.employee_ids = performanceCycleForm.value.employee_ids.filter((id) => eligibleIds.has(id));
@@ -848,6 +901,7 @@ async function loadActive() {
         }
         if (activeSlug.value === 'expenses') expenseData.value = await api('/expenses');
         if (activeSlug.value === 'loans-advances') loanData.value = await api('/loans-advances');
+        if (activeSlug.value === 'travel') travelData.value = await api('/travel');
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -2988,6 +3042,121 @@ async function submitLoanRepayment(loan) {
     }
 }
 
+function travelStatusLabel(status) {
+    return {
+        pending: 'Awaiting review',
+        approved: 'Approved',
+        rejected: 'Rejected',
+        report_submitted: 'Report submitted',
+        reconciled: 'Reconciled',
+    }[status] || String(status || '').replaceAll('_', ' ');
+}
+
+async function submitTravelRequest() {
+    travelFormError.value = '';
+    busy.value = true;
+    try {
+        await api('/travel', { method: 'POST', body: JSON.stringify(travelForm.value) });
+        travelForm.value = { origin: '', destination: '', purpose: '', departure_date: '', return_date: '', estimated_budget: '', itinerary_notes: '' };
+        travelFormOpen.value = false;
+        travelTab.value = 'all';
+        message('Travel request submitted for review. No booking or funds were initiated.');
+        await loadActive();
+    } catch (requestError) {
+        travelFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openTravelReview(trip, decision) {
+    travelReviewId.value = trip.id;
+    travelReviewDecision.value = decision;
+    travelReviewForm.value = {
+        approved_budget: trip.estimated_budget,
+        review_note: '',
+    };
+    travelReviewError.value = '';
+    travelReviewOpen.value = true;
+}
+
+function closeTravelReview() {
+    travelReviewOpen.value = false;
+    travelReviewId.value = null;
+    travelReviewError.value = '';
+}
+
+async function submitTravelReview() {
+    if (!selectedTravelTrip.value) return;
+    travelReviewError.value = '';
+    busy.value = true;
+    try {
+        const body = {
+            decision: travelReviewDecision.value,
+            review_note: travelReviewForm.value.review_note.trim() || null,
+        };
+        if (travelReviewDecision.value === 'approve') body.approved_budget = travelReviewForm.value.approved_budget;
+        await api(`/travel/${selectedTravelTrip.value.id}/review`, { method: 'POST', body: JSON.stringify(body) });
+        travelReviewDialog.value?.close();
+        message(travelReviewDecision.value === 'approve'
+            ? 'Travel request approved. This does not book travel or issue funds.'
+            : 'Travel request rejected with a recorded reason.');
+        await loadActive();
+    } catch (requestError) {
+        travelReviewError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openTravelReport(trip) {
+    travelReportId.value = trip.id;
+    travelReportForm.value = { actual_total: '', post_trip_note: '' };
+    travelReportError.value = '';
+}
+
+async function submitTravelReport(trip) {
+    travelReportError.value = '';
+    busy.value = true;
+    try {
+        await api(`/travel/${trip.id}/post-trip-report`, {
+            method: 'POST',
+            body: JSON.stringify(travelReportForm.value),
+        });
+        travelReportId.value = null;
+        message('Post-trip report submitted to HR for reconciliation.');
+        await loadActive();
+    } catch (requestError) {
+        travelReportError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openTravelReconcile(trip) {
+    travelReconcileId.value = trip.id;
+    travelReconcileNote.value = '';
+    travelReconcileError.value = '';
+}
+
+async function submitTravelReconcile(trip) {
+    travelReconcileError.value = '';
+    busy.value = true;
+    try {
+        await api(`/travel/${trip.id}/reconcile`, {
+            method: 'POST',
+            body: JSON.stringify({ reconciliation_note: travelReconcileNote.value }),
+        });
+        travelReconcileId.value = null;
+        message('Travel report reconciled. This does not record a reimbursement payment.');
+        await loadActive();
+    } catch (requestError) {
+        travelReconcileError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -3071,6 +3240,12 @@ function formatDate(value) {
 function localDateInput(date) {
     const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     return localDate.toISOString().slice(0, 10);
+}
+
+function travelDurationDays(start, end) {
+    const startDate = new Date(`${String(start).slice(0, 10)}T00:00:00Z`);
+    const endDate = new Date(`${String(end).slice(0, 10)}T00:00:00Z`);
+    return Math.max(1, Math.round((endDate - startDate) / 86400000) + 1);
 }
 
 function currentMonthStart() {
@@ -4553,6 +4728,80 @@ onUnmounted(() => {
                         <div v-else class="expense-empty-state"><span class="empty-icon">¤</span><b>{{ loanTab === 'review' ? 'Your review queue is clear.' : loanSearch || loanStatusFilter !== 'all' ? 'No requests match these filters.' : 'No loan requests yet.' }}</b><p>{{ loanTab === 'review' ? 'New requests from employees in your review scope will appear here.' : 'Submit a request to begin the review process.' }}</p><button v-if="canApplyForLoan && !loanData.loans.some((loan) => loan.status === 'pending' || loan.status === 'approved') && loanTab === 'all' && !loanFormOpen" class="button button-primary" @click="loanFormOpen = true">Start an application</button><button v-else-if="loanSearch || loanStatusFilter !== 'all'" class="button button-soft" @click="loanSearch = ''; loanStatusFilter = 'all'">Clear filters</button></div>
                     </section>
                     <p class="expense-boundary-note"><span>ⓘ</span> Repayment schedules use simple principal-only arithmetic and are not legal or financial advice. Reconciliation logs repayments made outside the app; there is no disbursement, payroll deduction, bank connection, or automated collection.</p>
+                </template>
+
+                <template v-else-if="activeSlug === 'travel'">
+                    <section class="page-heading travel-heading">
+                        <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> TRAVEL DESK</span><h1>Plan with clarity. Travel with confidence.</h1><p>Route requests, itinerary details, approved budgets, and post-trip reconciliation in one place.</p></div>
+                        <button v-if="canRequestTravel" class="button button-primary" @click="travelFormOpen = !travelFormOpen">{{ travelFormOpen ? 'Close request' : '＋ Request business travel' }}</button>
+                    </section>
+                    <section class="growth-metrics travel-metrics" aria-label="Travel workspace summary">
+                        <article><span class="growth-metric-icon">↗</span><div><span class="eyebrow">TRIPS IN SCOPE</span><b>{{ travelData.meta.total }}</b><small>Visible within your people scope</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">AWAITING REVIEW</span><b>{{ travelData.meta.pending }}</b><small>Requests pending a decision</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">SUBMITTED REPORTS</span><b>{{ travelData.meta.report_submitted }}</b><small>Post-trip submissions in scope</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-overdue">¤</span><div><span class="eyebrow">APPROVED BUDGETS</span><b class="travel-total-value">{{ travelApprovedTotals }}</b><small>By trip currency; no booking issued</small></div></article>
+                    </section>
+                    <section class="panel travel-workspace">
+                        <section v-if="travelFormOpen" class="growth-form travel-form">
+                            <div class="growth-form-heading"><div><span class="eyebrow">BUSINESS TRAVEL REQUEST</span><h2>Share the travel plan.</h2><p>Approval records an internal decision and budget ceiling. It does not book flights, hotels, visas, insurance, or ground transport.</p></div><button type="button" class="icon-button" aria-label="Close travel request form" @click="travelFormOpen = false; travelFormError = ''">×</button></div>
+                            <form class="growth-form-grid" @submit.prevent="submitTravelRequest">
+                                <label>From<input v-model.trim="travelForm.origin" maxlength="140" required placeholder="City or location"></label>
+                                <label>Destination<input v-model.trim="travelForm.destination" maxlength="140" required placeholder="City or location"></label>
+                                <label>Departure date<input v-model="travelForm.departure_date" type="date" :min="localDateInput(new Date())" required></label>
+                                <label>Return date<input v-model="travelForm.return_date" type="date" :min="travelForm.departure_date || localDateInput(new Date())" required></label>
+                                <label>Estimated total ({{ user.employee?.currency || user.company?.currency || 'USD' }})<input v-model="travelForm.estimated_budget" type="number" min="0.01" max="9999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00"></label>
+                                <label class="growth-field-wide">Business purpose<textarea v-model.trim="travelForm.purpose" rows="2" maxlength="2000" required placeholder="Business objective, meetings, or event"></textarea></label>
+                                <label class="growth-field-wide">Proposed itinerary<textarea v-model.trim="travelForm.itinerary_notes" rows="3" maxlength="4000" placeholder="Optional travel legs, dates, meeting times, and booking references"></textarea></label>
+                                <div v-if="travelFormError" class="inline-error growth-field-wide" role="alert">{{ travelFormError }}</div>
+                                <div class="growth-form-footer growth-field-wide"><span>Do not enter passport, visa, health, or other sensitive identity information here.</span><div><button type="button" class="button button-soft" @click="travelFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Submitting…' : 'Submit for approval' }}</button></div></div>
+                            </form>
+                        </section>
+                        <div class="travel-toolbar">
+                            <nav class="growth-tabs" aria-label="Travel request views">
+                                <button :class="{ active: travelTab === 'all' }" @click="travelTab = 'all'">All trips <span>{{ travelData.meta.total }}</span></button>
+                                <button v-if="canReviewExpenses" :class="{ active: travelTab === 'review' }" @click="travelTab = 'review'">Review queue <span>{{ travelReviewQueue.length }}</span></button>
+                                <button :class="{ active: travelTab === 'reports' }" @click="travelTab = 'reports'">Post-trip reports <span>{{ travelReports.length }}</span></button>
+                            </nav>
+                            <div class="travel-filters">
+                                <label><span class="visually-hidden">Filter travel requests by status</span><select v-model="travelStatusFilter"><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="report_submitted">Report submitted</option><option value="reconciled">Reconciled</option></select></label>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="travelSearch" aria-label="Search travel requests" placeholder="Search traveler, destination, purpose"></label>
+                            </div>
+                        </div>
+                        <div v-if="travelData.meta.truncated" class="expense-truncation-note">Showing the latest {{ travelData.meta.limit }} trips in your access scope.</div>
+                        <div v-if="visibleTravelTrips.length" class="travel-list">
+                            <article v-for="trip in visibleTravelTrips" :key="trip.id" class="travel-card">
+                                <div class="travel-card-header">
+                                    <div class="travel-route">
+                                        <span class="travel-route-point"><small>FROM</small><b>{{ trip.origin }}</b></span><span class="travel-route-line" aria-hidden="true">→</span><span class="travel-route-point"><small>DESTINATION</small><b>{{ trip.destination }}</b></span>
+                                    </div>
+                                    <span class="self-service-status-pill" :class="trip.status === 'reconciled' ? 'self-service-status-approved' : trip.status === 'rejected' ? 'self-service-status-rejected' : trip.status === 'pending' || trip.status === 'report_submitted' ? 'self-service-status-pending' : 'self-service-status-approved'">{{ travelStatusLabel(trip.status) }}</span>
+                                </div>
+                                <div class="travel-trip-meta"><span>{{ formatDate(trip.departure_date) }} – {{ formatDate(trip.return_date) }} <i>·</i> {{ travelDurationDays(trip.departure_date, trip.return_date) }} {{ travelDurationDays(trip.departure_date, trip.return_date) === 1 ? 'day' : 'days' }}</span><span v-if="canReviewExpenses">{{ trip.employee_name }} · {{ trip.employee_code }}</span></div>
+                                <p class="travel-purpose">{{ trip.purpose }}</p>
+                                <details v-if="trip.itinerary_notes" class="travel-itinerary"><summary>Proposed itinerary</summary><p>{{ trip.itinerary_notes }}</p></details>
+                                <div class="travel-budget-row"><span><small>ESTIMATE</small><b>{{ formatLoanMoney(trip.estimated_budget, trip.currency) }}</b></span><span v-if="trip.approved_budget"><small>APPROVED CEILING</small><b>{{ formatLoanMoney(trip.approved_budget, trip.currency) }}</b></span><span v-if="trip.actual_total !== null"><small>REPORTED ACTUAL</small><b>{{ formatLoanMoney(trip.actual_total, trip.currency) }}</b></span><span v-if="trip.reviewer?.name"><small>REVIEWED BY</small><b>{{ trip.reviewer.name }}</b></span></div>
+                                <small v-if="trip.review_note" class="expense-review-note">Review note: {{ trip.review_note }}</small>
+                                <div v-if="trip.can_review" class="travel-card-actions"><button class="button button-soft" :disabled="busy" @click="openTravelReview(trip, 'reject')">Reject</button><button class="button button-primary" :disabled="busy" @click="openTravelReview(trip, 'approve')">Approve &amp; set budget</button></div>
+                                <form v-if="trip.can_submit_report && travelReportId === trip.id" class="travel-inline-form" @submit.prevent="submitTravelReport(trip)">
+                                    <div><span class="eyebrow">TRAVELER REPORT</span><h3>Report the completed trip.</h3><p>Report total actual spend, including any variance from the approved ceiling, with a concise explanation.</p></div>
+                                    <label>Actual total ({{ trip.currency }})<input v-model="travelReportForm.actual_total" type="number" min="0" max="9999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00"></label>
+                                    <label class="travel-inline-wide">Post-trip notes<textarea v-model.trim="travelReportForm.post_trip_note" rows="3" maxlength="4000" required placeholder="Summarize outcomes and explain any budget variance"></textarea></label>
+                                    <div v-if="travelReportError" class="inline-error travel-inline-wide" role="alert">{{ travelReportError }}</div>
+                                    <div class="travel-inline-footer"><span>Report submission does not request or trigger reimbursement.</span><div><button type="button" class="button button-soft" @click="travelReportId = null; travelReportError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Submitting…' : 'Submit trip report' }}</button></div></div>
+                                </form>
+                                <div v-else-if="trip.can_submit_report" class="travel-card-actions"><button class="button button-primary" @click="openTravelReport(trip)">Submit post-trip report</button></div>
+                                <section v-if="trip.status === 'report_submitted' || trip.status === 'reconciled'" class="travel-report-summary"><div><span class="eyebrow">POST-TRIP REPORT</span><p>{{ trip.post_trip_note }}</p><small>Submitted {{ formatDate(trip.report_submitted_at) }}</small></div><div v-if="trip.reconciliation_note"><span class="eyebrow">HR RECONCILIATION</span><p>{{ trip.reconciliation_note }}</p><small v-if="trip.reconciler?.name">Reviewed by {{ trip.reconciler.name }} · {{ formatDate(trip.reconciled_at) }}</small></div></section>
+                                <form v-if="trip.can_reconcile && travelReconcileId === trip.id" class="travel-reconcile-form" @submit.prevent="submitTravelReconcile(trip)">
+                                    <label>Reconciliation note<textarea v-model.trim="travelReconcileNote" rows="2" maxlength="2000" required placeholder="Confirm review of the submitted report and budget variance"></textarea></label>
+                                    <div v-if="travelReconcileError" class="inline-error" role="alert">{{ travelReconcileError }}</div>
+                                    <div class="travel-inline-footer"><span>Marks the report reviewed; no payment is recorded.</span><div><button type="button" class="button button-soft" @click="travelReconcileId = null; travelReconcileError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Confirm reconciliation' }}</button></div></div>
+                                </form>
+                                <div v-else-if="trip.can_reconcile" class="travel-card-actions"><button class="button button-soft" @click="openTravelReconcile(trip)">Reconcile report</button></div>
+                            </article>
+                        </div>
+                        <div v-else class="expense-empty-state"><span class="empty-icon">↗</span><b>{{ travelTab === 'review' ? 'Your travel review queue is clear.' : travelTab === 'reports' ? 'No post-trip reports need attention.' : travelSearch || travelStatusFilter !== 'all' ? 'No trips match these filters.' : 'No travel requests yet.' }}</b><p>{{ travelTab === 'review' ? 'Pending requests from your review scope will appear here.' : travelTab === 'reports' ? 'Approved travelers can submit a report after their return date.' : 'Create a request when business travel needs approval.' }}</p><button v-if="canRequestTravel && travelTab === 'all' && !travelFormOpen" class="button button-primary" @click="travelFormOpen = true">Plan a business trip</button><button v-else-if="travelSearch || travelStatusFilter !== 'all'" class="button button-soft" @click="travelSearch = ''; travelStatusFilter = 'all'">Clear filters</button></div>
+                    </section>
+                    <p class="expense-boundary-note"><span>ⓘ</span> This is a manually maintained internal travel record. It does not make bookings, arrange visas, determine allowances, or initiate reimbursement or payments.</p>
                 </template>
 
                 <template v-else>

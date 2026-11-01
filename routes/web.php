@@ -17,6 +17,7 @@ use App\Http\Controllers\PayrollController;
 use App\Http\Controllers\RecruitmentController;
 use App\Http\Controllers\SeparationController;
 use App\Http\Controllers\ShiftRosterController;
+use App\Http\Controllers\TravelController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('api')->group(function () {
@@ -40,6 +41,11 @@ Route::prefix('api')->group(function () {
         Route::post('/loans-advances', [LoanAdvanceController::class, 'store']);
         Route::post('/loans-advances/installments/{installment}/repayments', [LoanAdvanceController::class, 'recordRepayment']);
         Route::post('/loans-advances/{loan}/review', [LoanAdvanceController::class, 'review']);
+        Route::get('/travel', [TravelController::class, 'index']);
+        Route::post('/travel', [TravelController::class, 'store']);
+        Route::post('/travel/{trip}/review', [TravelController::class, 'review']);
+        Route::post('/travel/{trip}/post-trip-report', [TravelController::class, 'submitReport']);
+        Route::post('/travel/{trip}/reconcile', [TravelController::class, 'reconcile']);
         Route::get('/organization', [OrganizationController::class, 'index']);
         Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
         Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);
