@@ -1172,6 +1172,8 @@ textarea { resize: vertical; }
 .benefit-form-grid label, .settlement-create-fields label, .benefit-contribution-grid label, .settlement-line label { display: grid; min-width: 0; gap: 5px; color: #68786e; font-size: 8px; font-weight: 600; }
 .benefit-form-grid input, .benefit-form-grid select, .benefit-form-grid textarea, .settlement-create-fields input, .settlement-create-fields select, .settlement-create-fields textarea, .benefit-contribution-grid input, .benefit-contribution-grid textarea, .settlement-line input, .settlement-line select { width: 100%; min-height: 34px; padding: 7px 8px; border: 1px solid #e2e9e4; border-radius: 6px; background: #fff; color: #40534a; font-size: 8px; }
 .benefit-form-grid textarea, .settlement-create-fields textarea, .benefit-contribution-grid textarea { min-height: 56px; resize: vertical; }
+.benefit-form-grid select:disabled { background: #f5f7f6; color: #75847c; }
+.benefit-field-hint { color: #98a39e; font-size: 7px; font-weight: 400; }
 .benefit-form-wide { grid-column: 1 / -1; }
 .benefit-form-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid #e9efeb; color: #87948c; font-size: 7px; }
 .benefit-form-footer > div { display: flex; gap: 6px; }

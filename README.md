@@ -92,9 +92,10 @@ The browser uses Laravel session authentication and CSRF protection. If a long-l
 - `GET /api/payroll`, `POST /api/payroll/cycles`
 - `PATCH /api/payroll/items/{item}`, `POST /api/payroll/cycles/{cycle}/submit`, `POST /api/payroll/cycles/{cycle}/review`
 - `GET /api/benefits`, `POST /api/benefits/plans`, `PATCH /api/benefits/plans/{plan}`
-- `POST /api/benefits/enrollments`, `PATCH /api/benefits/enrollments/{enrollment}`, `POST /api/benefits/enrollments/{enrollment}/submit`, `/review`, and `/end`
+- `POST /api/benefits/enrollments`, `PATCH /api/benefits/enrollments/{enrollment}`
+- `POST /api/benefits/enrollments/{enrollment}/submit`, `/api/benefits/enrollments/{enrollment}/review`, `/api/benefits/enrollments/{enrollment}/end`
 - `GET /api/separations`, `POST /api/separations/settlements`
-- `PUT /api/separations/settlements/{settlement}/items`, `POST /api/separations/settlements/{settlement}/submit`, `/review`
+- `PUT /api/separations/settlements/{settlement}/items`, `POST /api/separations/settlements/{settlement}/submit`, `/api/separations/settlements/{settlement}/review`
 - `GET /api/leave`, `POST /api/leave`, `POST /api/leave/{leaveRequest}/review`
 
 Tenant/branch scoping is enforced in `App\Support\PeopleScope` and each domain controller, not only in the Vue navigation. HR/admin can access their company; managers are limited to their own record and direct reports; employees are limited to their own record. Payroll, benefit, and separation inputs are restricted to HR/admin; identity documents, statutory payroll calculations, UAE legal calculations, and external integrations are not implemented or represented as active.

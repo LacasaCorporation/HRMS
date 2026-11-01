@@ -187,7 +187,7 @@ const descriptions = {
     'onboarding-offboarding': 'Run employee onboarding and offboarding with dated checklists, progress tracking, and controlled closure.',
     'shifts-rosters': 'Create shift patterns and publish a scoped weekly roster with assignment and leave-conflict safeguards.',
     payroll: 'Prepare payroll input cycles, capture reviewed amounts, route approvals, and export a controlled workpaper.',
-    benefits: 'Benefits enrollment, allowances, insurance, and compensation policies.',
+    benefits: 'Manage program metadata, manually record benefit enrollment amounts, and document HR review decisions.',
     performance: 'Goals, reviews, feedback, and documented performance plans.',
     training: 'Training needs, programs, attendance, credentials, and career development.',
     'employee-self-service': 'Employee-owned profile, requests, documents, letters, and payroll views.',
@@ -199,7 +199,7 @@ const descriptions = {
     'health-safety': 'Safety incidents, risk assessments, inspections, PPE, and follow-up actions.',
     'assets-uniforms': 'Assignment, handover, return, condition, uniforms, and PPE records.',
     documents: 'Private employee records with controlled uploads, access, and expiry tracking.',
-    'separation-settlement': 'Exit workflow, clearances, recoveries, settlement review, and closure.',
+    'separation-settlement': 'Prepare offboarding-linked settlement workpapers with manual lines, completed clearances, and recorded review.',
     reports: 'Permission-aware views and exports based on persisted domain data.',
     settings: 'Company masters, leave and attendance rules, approval workflows, and access settings.',
     'workforce-planning': 'Manpower plans, positions, demand forecasts, and budget boundaries.',
@@ -1184,13 +1184,14 @@ function benefitContributionChanged(enrollment) {
 }
 
 async function submitBenefitEnrollment(enrollment) {
+    benefitContributionErrors.value = { ...benefitContributionErrors.value, [enrollment.id]: '' };
     busy.value = true;
     try {
         await api(`/benefits/enrollments/${enrollment.id}/submit`, { method: 'POST', body: '{}' });
         message('Enrollment submitted for HR review. Inputs are locked.');
         await loadActive();
     } catch (requestError) {
-        message(requestError.message, true);
+        benefitContributionErrors.value = { ...benefitContributionErrors.value, [enrollment.id]: requestError.message };
     } finally {
         busy.value = false;
     }
@@ -1371,6 +1372,7 @@ async function saveSettlementItems() {
 
 async function submitSettlement() {
     if (!selectedSettlement.value) return;
+    settlementItemError.value = '';
     busy.value = true;
     try {
         await api(`/separations/settlements/${selectedSettlement.value.id}/submit`, {
@@ -1380,7 +1382,7 @@ async function submitSettlement() {
         message('Settlement workpaper submitted for review. No payment was made.');
         await loadActive();
     } catch (requestError) {
-        message(requestError.message, true);
+        settlementItemError.value = requestError.message;
     } finally {
         busy.value = false;
     }
@@ -3130,7 +3132,7 @@ onUnmounted(() => {
                                     <label>Plan name<input v-model.trim="benefitPlanForm.name" maxlength="140" required placeholder="Medical cover"></label>
                                     <label>Program category<select v-model="benefitPlanForm.category" required><option value="allowance">Allowance</option><option value="insurance">Insurance</option><option value="retirement">Retirement</option><option value="wellbeing">Wellbeing</option><option value="other">Other</option></select></label>
                                     <label>Currency<select v-model="benefitPlanForm.currency" required><option value="AED">AED · UAE dirham</option><option value="INR">INR · Indian rupee</option><option value="SAR">SAR · Saudi riyal</option></select></label>
-                                    <label v-if="!user.branch_id">Branch scope<select v-model="benefitPlanForm.branch_id"><option value="">Company-wide</option><option v-for="branch in benefitsData.branches" :key="branch.id" :value="String(branch.id)">{{ branch.name }}</option></select></label>
+                                    <label v-if="!user.branch_id">Branch scope<select v-model="benefitPlanForm.branch_id" :disabled="Boolean(editingBenefitPlanId)"><option value="">Company-wide</option><option v-for="branch in benefitsData.branches" :key="branch.id" :value="String(branch.id)">{{ branch.name }}</option></select><small v-if="editingBenefitPlanId" class="benefit-field-hint">Scope is fixed after plan creation.</small></label>
                                     <label>Provider (optional)<input v-model.trim="benefitPlanForm.provider" maxlength="180" placeholder="Provider or internal program"></label>
                                     <label v-if="editingBenefitPlanId">Plan status<select v-model="benefitPlanForm.status"><option value="active">Active</option><option value="archived">Archived</option></select></label>
                                     <label class="benefit-form-wide">Program description<textarea v-model.trim="benefitPlanForm.description" rows="2" maxlength="4000" placeholder="Describe coverage or the program in plain language"></textarea></label>
