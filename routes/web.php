@@ -8,6 +8,7 @@ use App\Http\Controllers\DisciplinaryController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EmployeeSelfServiceController;
 use App\Http\Controllers\ExpenseClaimController;
+use App\Http\Controllers\HealthSafetyController;
 use App\Http\Controllers\GrowthController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\LifecycleController;
@@ -52,6 +53,10 @@ Route::prefix('api')->group(function () {
         Route::post('/disciplinary/cases/{case}/start-review', [DisciplinaryController::class, 'startReview']);
         Route::post('/disciplinary/cases/{case}/employee-response', [DisciplinaryController::class, 'recordResponse']);
         Route::post('/disciplinary/cases/{case}/resolve', [DisciplinaryController::class, 'resolve']);
+        Route::get('/health-safety', [HealthSafetyController::class, 'index']);
+        Route::post('/health-safety/records', [HealthSafetyController::class, 'store']);
+        Route::post('/health-safety/records/{record}/assign', [HealthSafetyController::class, 'assign']);
+        Route::post('/health-safety/records/{record}/resolve', [HealthSafetyController::class, 'resolve']);
         Route::get('/organization', [OrganizationController::class, 'index']);
         Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
         Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);

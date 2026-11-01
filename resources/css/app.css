@@ -2116,3 +2116,64 @@ textarea { resize: vertical; }
     .disciplinary-action-footer > div { width: 100%; }
     .disciplinary-action-footer .button { flex: 1; }
 }
+
+.safety-heading { align-items: center; margin-bottom: 14px; }
+.safety-heading h1 { text-wrap: balance; }
+.safety-heading > .button { flex: 0 0 auto; }
+.safety-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.safety-workspace { overflow: hidden; }
+.safety-form { margin: 14px; }
+.safety-form small { color: #909b95; font-size: 7px; font-weight: 400; }
+.safety-toolbar { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #edf1ef; }
+.safety-toolbar .growth-tabs { overflow-x: auto; }
+.safety-toolbar .growth-tabs button { flex: 0 0 auto; }
+.safety-toolbar .growth-search { width: min(320px, 100%); }
+.safety-list { display: grid; }
+.safety-card { display: grid; min-width: 0; gap: 10px; padding: 15px; border-bottom: 1px solid #edf1ef; }
+.safety-card:last-child { border-bottom: 0; }
+.safety-card-header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.safety-card-header h2 { margin: 5px 0 3px; color: #31443b; font-family: Manrope, sans-serif; font-size: 12px; overflow-wrap: anywhere; }
+.safety-card-header p { margin: 0; color: #839087; font-size: 8px; }
+.safety-card-status { display: grid; justify-items: end; gap: 5px; }
+.safety-priority { color: #75847b; font-size: 7px; font-weight: 700; }
+.safety-priority-high, .safety-priority-urgent { color: #9c5a45; }
+.safety-summary { margin: 0; padding: 10px 12px; border-radius: 7px; background: #f8faf8; color: #53675c; font-size: 9px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.safety-owner { display: flex; flex-wrap: wrap; gap: 6px 14px; color: #87938c; font-size: 8px; }
+.safety-owner b { color: #506459; font-weight: 700; }
+.safety-records { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.safety-records > div { min-width: 0; padding: 10px; border: 1px solid #e9efea; border-radius: 7px; background: #fbfcfb; }
+.safety-records p { margin: 5px 0 0; color: #586b60; font-size: 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.safety-actions { display: flex; justify-content: flex-end; gap: 7px; }
+.safety-actions .button { min-height: 30px; padding: 0 10px; font-size: 8px; }
+.safety-action-form { display: grid; gap: 9px; padding: 12px; border: 1px solid #e5ece7; border-radius: 8px; background: #f8fbf8; }
+.safety-action-form > label { display: grid; min-width: 0; gap: 5px; color: #68786e; font-size: 8px; font-weight: 600; }
+.safety-action-form select, .safety-action-form textarea { width: 100%; min-height: 34px; padding: 7px 8px; border: 1px solid #e2e9e4; border-radius: 6px; background: #fff; color: #40534a; font: inherit; }
+.safety-action-form textarea { resize: vertical; }
+.safety-action-footer { display: flex; align-items: center; justify-content: space-between; gap: 9px; color: #87938c; font-size: 7px; line-height: 1.45; }
+.safety-action-footer > div { display: flex; flex: 0 0 auto; gap: 6px; }
+.safety-action-footer .button { min-height: 29px; font-size: 7px; }
+
+@media (max-width: 1100px) {
+    .safety-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+    .safety-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .safety-heading > .button { width: 100%; }
+    .safety-toolbar { align-items: stretch; flex-direction: column; gap: 8px; padding: 10px; }
+    .safety-toolbar .growth-tabs { min-height: 38px; }
+    .safety-toolbar .growth-search { width: 100%; }
+}
+@media (max-width: 440px) {
+    .safety-metrics { gap: 7px; }
+    .safety-metrics > article { min-height: 72px; padding: 8px; }
+    .safety-metrics .growth-metric-icon { width: 28px; height: 28px; flex-basis: 28px; }
+    .safety-card { padding: 12px; }
+    .safety-card-header { align-items: flex-start; flex-direction: column; }
+    .safety-card-status { justify-items: start; }
+    .safety-records { grid-template-columns: 1fr; }
+    .safety-actions { justify-content: stretch; }
+    .safety-actions .button { flex: 1; }
+    .safety-action-footer { align-items: stretch; flex-direction: column; }
+    .safety-action-footer > div { width: 100%; }
+    .safety-action-footer .button { flex: 1; }
+}

@@ -86,6 +86,22 @@ const disciplinaryActionId = ref(null);
 const disciplinaryActionType = ref('');
 const disciplinaryActionForm = ref({ investigator_id: '', investigation_notes: '', employee_response: '', resolution_summary: '' });
 const disciplinaryActionError = ref('');
+const safetyData = ref({
+    records: [], employees: [], assignees: [],
+    meta: { total: 0, open: 0, in_progress: 0, resolved: 0, limit: 300, truncated: false },
+});
+const safetyTab = ref('all');
+const safetySearch = ref('');
+const safetyFormOpen = ref(false);
+const safetyForm = ref({
+    record_type: 'hazard', occurred_on: localDateInput(new Date()), location: '',
+    priority: 'normal', summary: '', employee_id: '',
+});
+const safetyFormError = ref('');
+const safetyActionId = ref(null);
+const safetyActionType = ref('');
+const safetyActionForm = ref({ assigned_to: '', action_plan: '', resolution_summary: '' });
+const safetyActionError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -318,7 +334,7 @@ const descriptions = {
     'loans-advances': 'Request an advance, review principal-only repayment schedules, and reconcile repayments recorded outside the app.',
     travel: 'Submit business travel requests, record itinerary details, and reconcile post-trip reports.',
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
-    'health-safety': 'Safety incidents, risk assessments, inspections, PPE, and follow-up actions.',
+    'health-safety': 'Restricted, company/branch-scoped incident, hazard, inspection, and PPE records with assigned manual follow-up and documented resolution.',
     'assets-uniforms': 'Assignment, handover, return, condition, uniforms, and PPE records.',
     documents: 'Private employee records with controlled uploads, access, and expiry tracking.',
     'separation-settlement': 'Prepare offboarding-linked settlement workpapers with manual lines, completed clearances, and recorded review.',
@@ -352,7 +368,7 @@ const stagedScope = {
     'loans-advances': 'Employee applications, scoped approvals, equal-principal schedules, and HR/admin repayment reconciliation are available. No interest, disbursement, payroll deduction, or collection is initiated.',
     travel: 'Travel requests, manager/HR decisions, itinerary notes, approved budget ceilings, and manual post-trip report reconciliation are available. No booking or reimbursement is initiated.',
     disciplinary: 'Restricted, company/branch-scoped case intake, investigation, employee-response recording, and manual resolution tracking for HR/admin.',
-    'health-safety': 'Incident, risk, medical fitness, and action-management workflows are staged.',
+    'health-safety': 'Restricted HR/admin intake, manually entered priority, scoped assignment, action tracking, and documented resolution. No medical details or automated risk/compliance assessments are recorded.',
     'assets-uniforms': 'Assignments, returns, uniform records, and ERP boundaries are staged.',
     documents: 'Private file access, upload validation, expiry alerts, and retention controls are staged.',
     'separation-settlement': 'Settlement workpapers are linked to completed offboarding clearances. Earning and recovery lines are manually entered.',
@@ -489,6 +505,20 @@ const filteredDisciplinaryCases = computed(() => {
         const matchesSearch = !query || [
             caseItem.employee?.first_name, caseItem.employee?.last_name, caseItem.employee?.employee_code,
             caseItem.case_type, caseItem.status, caseItem.summary, caseItem.investigator?.name,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesTab && matchesSearch;
+    });
+});
+const filteredSafetyRecords = computed(() => {
+    const query = safetySearch.value.trim().toLowerCase();
+    return safetyData.value.records.filter((record) => {
+        const matchesTab = safetyTab.value === 'all'
+            || (safetyTab.value === 'open' && record.status === 'open')
+            || (safetyTab.value === 'in_progress' && record.status === 'in_progress')
+            || (safetyTab.value === 'resolved' && record.status === 'resolved');
+        const matchesSearch = !query || [
+            record.employee?.first_name, record.employee?.last_name, record.employee?.employee_code,
+            record.record_type, record.location, record.summary, record.status, record.assignee?.name,
         ].some((value) => String(value || '').toLowerCase().includes(query));
         return matchesTab && matchesSearch;
     });
@@ -936,6 +966,15 @@ async function loadActive() {
             }
             if (!disciplinaryActionForm.value.investigator_id && disciplinaryData.value.investigators.length) {
                 disciplinaryActionForm.value.investigator_id = String(disciplinaryData.value.investigators[0].id);
+            }
+        }
+        if (activeSlug.value === 'health-safety' && canManageOrganization.value) {
+            safetyData.value = await api('/health-safety');
+            if (!safetyForm.value.employee_id && safetyData.value.employees.length) {
+                safetyForm.value.employee_id = String(safetyData.value.employees[0].id);
+            }
+            if (!safetyActionForm.value.assigned_to && safetyData.value.assignees.length) {
+                safetyActionForm.value.assigned_to = String(safetyData.value.assignees[0].id);
             }
         }
         if (activeSlug.value === 'shifts-rosters') {
@@ -3282,6 +3321,102 @@ async function submitDisciplinaryAction(caseItem) {
     }
 }
 
+function safetyTypeLabel(type) {
+    return {
+        incident: 'Incident',
+        hazard: 'Hazard',
+        inspection: 'Inspection',
+        ppe: 'PPE concern',
+    }[type] || String(type || '').replaceAll('_', ' ');
+}
+
+function safetyStatusLabel(status) {
+    return {
+        open: 'Open',
+        in_progress: 'Action in progress',
+        resolved: 'Resolved',
+    }[status] || String(status || '').replaceAll('_', ' ');
+}
+
+function safetyPriorityLabel(priority) {
+    return {
+        low: 'Low',
+        normal: 'Normal',
+        high: 'High',
+        urgent: 'Urgent',
+    }[priority] || String(priority || '').replaceAll('_', ' ');
+}
+
+async function submitSafetyRecord() {
+    safetyFormError.value = '';
+    busy.value = true;
+    try {
+        await api('/health-safety/records', {
+            method: 'POST',
+            body: JSON.stringify({
+                ...safetyForm.value,
+                employee_id: safetyForm.value.employee_id || null,
+            }),
+        });
+        safetyForm.value = {
+            record_type: 'hazard',
+            occurred_on: localDateInput(new Date()),
+            location: '',
+            priority: 'normal',
+            summary: '',
+            employee_id: safetyData.value.employees[0]?.id ? String(safetyData.value.employees[0].id) : '',
+        };
+        safetyFormOpen.value = false;
+        safetyTab.value = 'all';
+        message('Safety record created for scoped HR follow-up. No compliance determination was made.');
+        await loadActive();
+    } catch (requestError) {
+        safetyFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openSafetyAction(record, action) {
+    safetyActionId.value = record.id;
+    safetyActionType.value = action;
+    safetyActionForm.value = {
+        assigned_to: String(record.assigned_to || safetyData.value.assignees[0]?.id || ''),
+        action_plan: '',
+        resolution_summary: '',
+    };
+    safetyActionError.value = '';
+}
+
+async function submitSafetyAction(record) {
+    safetyActionError.value = '';
+    busy.value = true;
+    const action = safetyActionType.value;
+    const endpoint = action === 'assign' ? 'assign' : 'resolve';
+    const body = action === 'assign'
+        ? {
+            assigned_to: safetyActionForm.value.assigned_to,
+            action_plan: safetyActionForm.value.action_plan,
+        }
+        : { resolution_summary: safetyActionForm.value.resolution_summary };
+    try {
+        await api(`/health-safety/records/${record.id}/${endpoint}`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        safetyActionId.value = null;
+        safetyActionType.value = '';
+        message(action === 'assign'
+            ? 'Follow-up action assigned and recorded.'
+            : 'Follow-up marked resolved with a manual summary.');
+        await loadActive();
+    } catch (requestError) {
+        safetyActionError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -4995,6 +5130,72 @@ onUnmounted(() => {
                         <p class="expense-boundary-note"><span>ⓘ</span> This restricted tracker is not a legal process, finding, sanction, or termination tool. Use approved company procedures and applicable legal guidance; manage retention and employee access outside this foundation.</p>
                     </template>
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted HR workspace</b><p>Disciplinary case records are available only to HR and administrator accounts within their company or branch scope.</p></section>
+                </template>
+
+                <template v-else-if="activeSlug === 'health-safety'">
+                    <template v-if="canManageOrganization">
+                        <section class="page-heading safety-heading">
+                            <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> HEALTH &amp; SAFETY</span><h1>Make safer work visible.</h1><p>Capture workplace observations, assign practical follow-up, and record closure for your authorized company or branch.</p></div>
+                            <button class="button button-primary" @click="safetyFormOpen = !safetyFormOpen">{{ safetyFormOpen ? 'Close report form' : '＋ Record a safety item' }}</button>
+                        </section>
+                        <section class="growth-metrics safety-metrics" aria-label="Health and safety summary">
+                            <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">RECORDS IN SCOPE</span><b>{{ safetyData.meta.total }}</b><small>Restricted to scoped HR and admins</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">OPEN</span><b>{{ safetyData.meta.open }}</b><small>Awaiting an assigned action</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-overdue">↗</span><div><span class="eyebrow">ACTION IN PROGRESS</span><b>{{ safetyData.meta.in_progress }}</b><small>Follow-up has an owner</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">RESOLVED</span><b>{{ safetyData.meta.resolved }}</b><small>Closure recorded manually</small></div></article>
+                        </section>
+                        <section class="panel safety-workspace">
+                            <section v-if="safetyFormOpen" class="growth-form safety-form">
+                                <div class="growth-form-heading"><div><span class="eyebrow">RESTRICTED SAFETY INTAKE</span><h2>Record an observation.</h2><p>Use this record to route a workplace incident, hazard, inspection finding, or PPE concern to HR follow-up.</p></div><button type="button" class="icon-button" aria-label="Close safety report form" @click="safetyFormOpen = false; safetyFormError = ''">×</button></div>
+                                <form class="growth-form-grid" @submit.prevent="submitSafetyRecord">
+                                    <label>Record type<select v-model="safetyForm.record_type" required><option value="incident">Incident</option><option value="hazard">Hazard</option><option value="inspection">Inspection finding</option><option value="ppe">PPE concern</option></select></label>
+                                    <label>Occurred on<input v-model="safetyForm.occurred_on" type="date" :max="localDateInput(new Date())" required></label>
+                                    <label>Location<input v-model.trim="safetyForm.location" maxlength="180" placeholder="Site, area, or equipment (optional)"></label>
+                                    <label>Review priority (manual)<select v-model="safetyForm.priority" required><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select><small>Entered by the reporter; this app does not assess risk.</small></label>
+                                    <label>Related employee (optional)<select v-model="safetyForm.employee_id"><option value="">Not employee-specific</option><option v-for="employee in safetyData.employees" :key="employee.id" :value="String(employee.id)">{{ employee.first_name }} {{ employee.last_name }} · {{ employee.employee_code }}</option></select></label>
+                                    <label class="growth-field-wide">Observation summary<textarea v-model.trim="safetyForm.summary" rows="4" maxlength="4000" required placeholder="Describe the reported condition or event factually. Avoid medical or sensitive personal information."></textarea></label>
+                                    <div v-if="safetyFormError" class="inline-error growth-field-wide" role="alert">{{ safetyFormError }}</div>
+                                    <div class="growth-form-footer growth-field-wide"><span>For immediate danger, follow your site emergency procedure. Do not enter medical diagnoses, identity details, or evidence files.</span><div><button type="button" class="button button-soft" @click="safetyFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save restricted record' }}</button></div></div>
+                                </form>
+                            </section>
+                            <div class="safety-toolbar">
+                                <nav class="growth-tabs" aria-label="Safety record views">
+                                    <button :class="{ active: safetyTab === 'all' }" @click="safetyTab = 'all'">All records <span>{{ safetyData.meta.total }}</span></button>
+                                    <button :class="{ active: safetyTab === 'open' }" @click="safetyTab = 'open'">Open <span>{{ safetyData.meta.open }}</span></button>
+                                    <button :class="{ active: safetyTab === 'in_progress' }" @click="safetyTab = 'in_progress'">In progress <span>{{ safetyData.meta.in_progress }}</span></button>
+                                    <button :class="{ active: safetyTab === 'resolved' }" @click="safetyTab = 'resolved'">Resolved <span>{{ safetyData.meta.resolved }}</span></button>
+                                </nav>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="safetySearch" aria-label="Search safety records" placeholder="Search category, employee, location"></label>
+                            </div>
+                            <div v-if="safetyData.meta.truncated" class="expense-truncation-note">Showing the latest {{ safetyData.meta.limit }} records in your access scope.</div>
+                            <div v-if="filteredSafetyRecords.length" class="safety-list">
+                                <article v-for="record in filteredSafetyRecords" :key="record.id" class="safety-card">
+                                    <div class="safety-card-header">
+                                        <div><span class="eyebrow">RECORD #{{ record.id }} <span class="dot-separator">•</span> {{ safetyTypeLabel(record.record_type) }}</span><h2>{{ record.location || 'Location not specified' }}</h2><p>{{ formatDate(record.occurred_on) }}<template v-if="record.employee"> · {{ record.employee.first_name }} {{ record.employee.last_name }} ({{ record.employee.employee_code }})</template></p></div>
+                                        <div class="safety-card-status"><span class="self-service-status-pill" :class="record.status === 'resolved' ? 'self-service-status-approved' : 'self-service-status-pending'">{{ safetyStatusLabel(record.status) }}</span><span class="safety-priority" :class="`safety-priority-${record.priority}`">{{ safetyPriorityLabel(record.priority) }} priority · manual</span></div>
+                                    </div>
+                                    <p class="safety-summary">{{ record.summary }}</p>
+                                    <div class="safety-owner"><span>Reported by <b>{{ record.reporter?.name || 'HR' }}</b></span><span v-if="record.assignee">Follow-up owner <b>{{ record.assignee.name }}</b></span><span v-if="record.resolver">Closed by <b>{{ record.resolver.name }}</b> · {{ formatDate(record.resolved_at) }}</span></div>
+                                    <section v-if="record.action_plan || record.resolution_summary" class="safety-records">
+                                        <div v-if="record.action_plan"><span class="eyebrow">FOLLOW-UP ACTION</span><p>{{ record.action_plan }}</p></div>
+                                        <div v-if="record.resolution_summary"><span class="eyebrow">CLOSURE SUMMARY</span><p>{{ record.resolution_summary }}</p></div>
+                                    </section>
+                                    <div v-if="record.status === 'open'" class="safety-actions"><button class="button button-primary" :disabled="busy || !safetyData.assignees.length" @click="openSafetyAction(record, 'assign')">Assign follow-up</button></div>
+                                    <div v-else-if="record.status === 'in_progress'" class="safety-actions"><button class="button button-primary" :disabled="busy" @click="openSafetyAction(record, 'resolve')">Record resolution</button></div>
+                                    <form v-if="safetyActionId === record.id" class="safety-action-form" @submit.prevent="submitSafetyAction(record)">
+                                        <label v-if="safetyActionType === 'assign'">HR follow-up owner<select v-model="safetyActionForm.assigned_to" required><option v-for="assignee in safetyData.assignees" :key="assignee.id" :value="String(assignee.id)">{{ assignee.name }} · {{ assignee.role }}</option></select></label>
+                                        <label v-if="safetyActionType === 'assign'">Follow-up action<textarea v-model.trim="safetyActionForm.action_plan" rows="3" maxlength="4000" required placeholder="Record the practical action and verification step"></textarea></label>
+                                        <label v-else>Resolution and verification summary<textarea v-model.trim="safetyActionForm.resolution_summary" rows="3" maxlength="4000" required placeholder="Document what was done and how the issue was checked"></textarea></label>
+                                        <div v-if="safetyActionError" class="inline-error" role="alert">{{ safetyActionError }}</div>
+                                        <div class="safety-action-footer"><span>Follow-up and closure are entered manually; no regulatory conclusion is inferred.</span><div><button type="button" class="button button-soft" @click="safetyActionId = null; safetyActionError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : safetyActionType === 'assign' ? 'Assign action' : 'Resolve record' }}</button></div></div>
+                                    </form>
+                                </article>
+                            </div>
+                            <div v-else class="expense-empty-state"><span class="empty-icon">✓</span><b>{{ safetySearch ? 'No safety records match your search.' : safetyData.meta.total ? 'No records in this view.' : 'No safety records yet.' }}</b><p>{{ safetySearch ? 'Try another category, employee, or location.' : 'Record a workplace observation to begin scoped follow-up.' }}</p><button v-if="!safetySearch && !safetyFormOpen" class="button button-primary" @click="safetyFormOpen = true">Record a safety item</button><button v-else-if="safetySearch" class="button button-soft" @click="safetySearch = ''">Clear search</button></div>
+                        </section>
+                        <p class="expense-boundary-note"><span>ⓘ</span> This is a restricted manual record tracker, not an emergency service, medical record system, risk assessment, or legal compliance certification. Use approved safety procedures and local guidance.</p>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted HR workspace</b><p>Health and safety records are available only to HR and administrator accounts within their company or branch scope.</p></section>
                 </template>
 
                 <template v-else>
