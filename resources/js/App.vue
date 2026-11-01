@@ -24,6 +24,20 @@ const selfServiceData = ref({
     employee: null, balances: [], leave_requests: [], leave_types: [], attendance: [], today_attendance: null,
 });
 const managerServiceData = ref({ employees: [], leave_requests: [], attendance: [] });
+const expenseData = ref({ claims: [], meta: { total: 0, pending: 0, approved: 0, rejected: 0, approved_amounts: [], truncated: false }, categories: [] });
+const expenseTab = ref('all');
+const expenseSearch = ref('');
+const expenseStatusFilter = ref('all');
+const expenseFormOpen = ref(false);
+const expenseForm = ref({ category: 'meals', merchant: '', expense_date: localDateInput(new Date()), amount: '', description: '' });
+const expenseReceiptFile = ref(null);
+const expenseFormError = ref('');
+const expenseReviewDialog = ref(null);
+const expenseReviewOpen = ref(false);
+const expenseReviewId = ref(null);
+const expenseReviewDecision = ref('approve');
+const expenseReviewNote = ref('');
+const expenseReviewError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -252,7 +266,7 @@ const descriptions = {
     training: 'Training needs, programs, attendance, credentials, and career development.',
     'employee-self-service': 'Your own profile contacts, attendance, and leave in one private workspace.',
     'manager-self-service': 'Direct-report directory, leave approvals, and attendance records.',
-    expenses: 'Expense claims, receipt handling, approval, and reimbursement tracking.',
+    expenses: 'Submit expense claims with receipts, review scoped requests, and keep approval history in one place.',
     'loans-advances': 'Applications, approvals, repayment schedules, balances, and settlement.',
     travel: 'Travel requests, itinerary, allowance rules, expenses, and settlements.',
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
@@ -286,7 +300,7 @@ const stagedScope = {
     training: 'Programs, provider records, attendance, certifications, and career plans are staged.',
     'employee-self-service': 'Employee-owned contacts, leave, and attendance are available. Private documents, letters, and payslips are not exposed.',
     'manager-self-service': 'Direct-report overview, team attendance, and leave decisions are available. Scheduling and other team workflows remain staged.',
-    expenses: 'Claim submission, receipt storage, approvals, and reimbursement are staged.',
+    expenses: 'Employee claim submission, private receipt downloads, and direct-report or HR review are available. Approval does not trigger reimbursement or payment.',
     'loans-advances': 'Loan requests, repayment schedules, payroll deductions, and settlement are staged.',
     travel: 'Travel requests, policy rules, itineraries, and settlement are staged.',
     disciplinary: 'Restricted case-management workflows are staged.',
@@ -344,6 +358,26 @@ const managerTodayAttendance = computed(() => managerTeamAttendance.value
     .filter((entry) => String(entry.attendance_date).slice(0, 10) === localDateInput(new Date())));
 const managerWorkingCount = computed(() => managerTodayAttendance.value
     .filter((entry) => entry.check_in && !entry.check_out).length);
+const canReviewExpenses = computed(() => ['admin', 'hr', 'manager'].includes(user.value?.role));
+const canSubmitExpenses = computed(() => ['admin', 'hr', 'manager', 'employee'].includes(user.value?.role)
+    && user.value?.employee?.status === 'active');
+const expenseReviewQueue = computed(() => expenseData.value.claims.filter((claim) => claim.can_review));
+const selectedExpenseClaim = computed(() => expenseData.value.claims.find((claim) => claim.id === expenseReviewId.value) || null);
+const visibleExpenseClaims = computed(() => {
+    const query = expenseSearch.value.trim().toLowerCase();
+    return expenseData.value.claims.filter((claim) => {
+        const matchesTab = expenseTab.value !== 'review' || claim.can_review;
+        const matchesStatus = expenseStatusFilter.value === 'all' || claim.status === expenseStatusFilter.value;
+        const matchesSearch = !query || [
+            claim.employee_name, claim.employee_code, claim.department, claim.merchant,
+            claim.category, claim.description, claim.status,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesTab && matchesStatus && matchesSearch;
+    });
+});
+const expenseApprovedTotals = computed(() => (expenseData.value.meta.approved_amounts || [])
+    .map((item) => `${item.currency} ${Number(item.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+    .join(' · ') || '—');
 const selectedManagerRequest = computed(() => managerTeamLeaveRequests.value
     .find((request) => request.id === managerReviewRequestId.value) || null);
 const filteredLifecycleCases = computed(() => {
@@ -552,6 +586,11 @@ watch(performanceReviewOpen, async (open) => {
     if (!open) return;
     await nextTick();
     if (performanceReviewDialog.value && !performanceReviewDialog.value.open) performanceReviewDialog.value.showModal();
+});
+watch(expenseReviewOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (expenseReviewDialog.value && !expenseReviewDialog.value.open) expenseReviewDialog.value.showModal();
 });
 watch([() => performanceCycleForm.value.branch_id, performanceCycleEmployees], () => {
     const eligibleIds = new Set(performanceCycleEmployees.value.map((employee) => employee.id));
@@ -762,6 +801,7 @@ async function loadActive() {
                 attendance: [attendanceResult, ...attendancePages].flatMap((page) => page.data),
             };
         }
+        if (activeSlug.value === 'expenses') expenseData.value = await api('/expenses');
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -2735,6 +2775,69 @@ async function submitManagerLeaveReview() {
     }
 }
 
+function expenseCategoryLabel(category) {
+    return String(category || 'other').replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+async function submitExpenseClaim() {
+    expenseFormError.value = '';
+    busy.value = true;
+    try {
+        const payload = new FormData();
+        Object.entries(expenseForm.value).forEach(([key, value]) => payload.append(key, value));
+        if (expenseReceiptFile.value) payload.append('receipt', expenseReceiptFile.value);
+        await api('/expenses', { method: 'POST', body: payload });
+        expenseForm.value = { category: 'meals', merchant: '', expense_date: localDateInput(new Date()), amount: '', description: '' };
+        expenseReceiptFile.value = null;
+        expenseFormOpen.value = false;
+        expenseTab.value = 'all';
+        message('Expense claim submitted for review. Approval does not arrange payment.');
+        await loadActive();
+    } catch (requestError) {
+        expenseFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openExpenseReview(claim, decision) {
+    expenseReviewId.value = claim.id;
+    expenseReviewDecision.value = decision;
+    expenseReviewNote.value = '';
+    expenseReviewError.value = '';
+    expenseReviewOpen.value = true;
+}
+
+function closeExpenseReview() {
+    expenseReviewOpen.value = false;
+    expenseReviewId.value = null;
+    expenseReviewError.value = '';
+}
+
+async function submitExpenseReview() {
+    if (!selectedExpenseClaim.value) return;
+    expenseReviewError.value = '';
+    busy.value = true;
+    try {
+        await api(`/expenses/${selectedExpenseClaim.value.id}/review`, {
+            method: 'POST',
+            body: JSON.stringify({
+                decision: expenseReviewDecision.value,
+                review_note: expenseReviewNote.value.trim() || null,
+            }),
+        });
+        expenseReviewDialog.value?.close();
+        message(expenseReviewDecision.value === 'approve'
+            ? 'Claim approved. Reimbursement still requires a separate process.'
+            : 'Claim rejected with a recorded reason.');
+        await loadActive();
+    } catch (requestError) {
+        expenseReviewError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -4187,7 +4290,55 @@ onUnmounted(() => {
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Manager workspace</b><p>This view is available to manager accounts with direct reports. Use the employee and attendance workspaces for other role-based access.</p></section>
                 </template>
 
-
+                <template v-else-if="activeSlug === 'expenses'">
+                    <section class="page-heading expense-heading">
+                        <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> EXPENSE CONTROL</span><h1>Expenses, handled clearly.</h1><p>Submit claims with supporting receipts and keep every decision auditable.</p></div>
+                        <button v-if="canSubmitExpenses" class="button button-primary" @click="expenseFormOpen = !expenseFormOpen">{{ expenseFormOpen ? 'Close claim form' : '＋ New expense claim' }}</button>
+                    </section>
+                    <section class="growth-metrics expense-metrics" aria-label="Expense claim summary">
+                        <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">CLAIMS IN SCOPE</span><b>{{ expenseData.meta.total }}</b><small>Visible in your access scope</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">PENDING REVIEW</span><b>{{ expenseData.meta.pending }}</b><small>Awaiting a decision</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">APPROVED</span><b>{{ expenseData.meta.approved }}</b><small>Approval is not payment</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-overdue">¤</span><div><span class="eyebrow">APPROVED VALUE</span><b class="expense-total-value">{{ expenseApprovedTotals }}</b><small>Grouped by claim currency</small></div></article>
+                    </section>
+                    <section class="panel expense-workspace">
+                        <section v-if="expenseFormOpen" class="growth-form expense-form">
+                            <div class="growth-form-heading"><div><span class="eyebrow">EMPLOYEE CLAIM</span><h2>Record an expense.</h2><p>Your claim is submitted immediately and becomes read-only while it is reviewed. Receipts are private and available only to you and authorized reviewers.</p></div><button type="button" class="icon-button" aria-label="Close expense claim form" @click="expenseFormOpen = false; expenseFormError = ''">×</button></div>
+                            <form class="growth-form-grid" @submit.prevent="submitExpenseClaim">
+                                <label>Category<select v-model="expenseForm.category" required><option v-for="category in expenseData.categories" :key="category" :value="category">{{ expenseCategoryLabel(category) }}</option></select></label>
+                                <label>Merchant or provider<input v-model.trim="expenseForm.merchant" maxlength="140" required placeholder="e.g. City cab"></label>
+                                <label>Date of expense<input v-model="expenseForm.expense_date" type="date" :max="localDateInput(new Date())" required></label>
+                                <label>Amount ({{ user.employee?.currency || user.company?.currency || 'USD' }})<input v-model="expenseForm.amount" type="number" min="0.01" max="9999999999.99" step="0.01" inputmode="decimal" required placeholder="0.00"></label>
+                                <label class="growth-field-wide">Business purpose<textarea v-model.trim="expenseForm.description" rows="3" maxlength="2000" required placeholder="Explain the business purpose and who or what it supported"></textarea></label>
+                                <label class="growth-field-wide">Receipt (PDF, JPG, or PNG · up to 5 MB)<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" @change="expenseReceiptFile = $event.target.files?.[0] || null"><small v-if="expenseReceiptFile" class="expense-file-name">{{ expenseReceiptFile.name }}</small></label>
+                                <div v-if="expenseFormError" class="inline-error growth-field-wide" role="alert">{{ expenseFormError }}</div>
+                                <div class="growth-form-footer growth-field-wide"><span>Submitting locks this claim for review. Approval does not initiate reimbursement or a bank payment.</span><div><button type="button" class="button button-soft" @click="expenseFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Submitting…' : 'Submit claim' }}</button></div></div>
+                            </form>
+                        </section>
+                        <div class="expense-toolbar">
+                            <nav class="growth-tabs" aria-label="Expense claim views">
+                                <button :class="{ active: expenseTab === 'all' }" @click="expenseTab = 'all'">All claims <span>{{ expenseData.meta.total }}</span></button>
+                                <button v-if="canReviewExpenses" :class="{ active: expenseTab === 'review' }" @click="expenseTab = 'review'">My review queue <span>{{ expenseReviewQueue.length }}</span></button>
+                            </nav>
+                            <div class="expense-filters">
+                                <label><span class="visually-hidden">Filter expense claims by status</span><select v-model="expenseStatusFilter"><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="expenseSearch" aria-label="Search expense claims" placeholder="Search person, merchant, purpose"></label>
+                            </div>
+                        </div>
+                        <div v-if="expenseData.meta.truncated" class="expense-truncation-note">Showing the latest {{ expenseData.meta.claim_limit }} records in your access scope. Narrow results or contact HR for older claims.</div>
+                        <div v-if="visibleExpenseClaims.length" class="expense-claim-list">
+                            <article v-for="claim in visibleExpenseClaims" :key="claim.id" class="expense-claim-card">
+                                <div class="expense-claim-main">
+                                    <span class="expense-category-mark" aria-hidden="true">{{ claim.category === 'transport' ? '↗' : claim.category === 'meals' ? '◉' : claim.category === 'accommodation' ? '⌂' : '▤' }}</span>
+                                    <div class="expense-claim-copy"><div class="expense-claim-title"><h2>{{ claim.merchant }}</h2><span class="self-service-status-pill" :class="`self-service-status-${claim.status}`">{{ claim.status }}</span></div><p>{{ expenseCategoryLabel(claim.category) }} · {{ formatDate(claim.expense_date) }}<template v-if="canReviewExpenses"> · {{ claim.employee_name }} ({{ claim.employee_code }})</template></p><p class="expense-description">{{ claim.description }}</p><small v-if="claim.review_note" class="expense-review-note">Review note: {{ claim.review_note }}<template v-if="claim.reviewer?.name"> · {{ claim.reviewer.name }}</template></small></div>
+                                </div>
+                                <div class="expense-claim-side"><b>{{ claim.currency }} {{ Number(claim.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}</b><a v-if="claim.receipt_path" class="expense-receipt-link" :href="`/api/expenses/${claim.id}/receipt`">↓ Receipt <span class="visually-hidden">for {{ claim.merchant }}</span></a><span v-else class="expense-no-receipt">No receipt attached</span><div v-if="claim.can_review" class="expense-review-actions"><button class="button button-soft" :disabled="busy" @click="openExpenseReview(claim, 'reject')">Reject</button><button class="button button-primary" :disabled="busy" @click="openExpenseReview(claim, 'approve')">Approve</button></div><span v-else-if="claim.status === 'pending'" class="expense-pending-copy">Awaiting review</span></div>
+                            </article>
+                        </div>
+                        <div v-else class="expense-empty-state"><span class="empty-icon">¤</span><b>{{ expenseTab === 'review' ? 'Your review queue is clear.' : expenseSearch || expenseStatusFilter !== 'all' ? 'No claims match these filters.' : 'No expense claims yet.' }}</b><p>{{ expenseTab === 'review' ? 'New claims from employees in your review scope will appear here.' : 'Submit a claim when you have a business expense to record.' }}</p><button v-if="canSubmitExpenses && expenseTab === 'all' && !expenseFormOpen" class="button button-primary" @click="expenseFormOpen = true">Create your first claim</button><button v-else-if="expenseSearch || expenseStatusFilter !== 'all'" class="button button-soft" @click="expenseSearch = ''; expenseStatusFilter = 'all'">Clear filters</button></div>
+                    </section>
+                    <p class="expense-boundary-note"><span>ⓘ</span> Approval records an internal decision only. Payment, reimbursement settlement, tax treatment, and accounting exports are not connected.</p>
+                </template>
 
                 <template v-else>
                     <section class="page-heading module-heading"><div><span class="eyebrow">{{ moduleBySlug?.area || 'WORKSPACE' }} <span class="dot-separator">•</span> MODULE OVERVIEW</span><h1>{{ moduleBySlug?.name || 'Workspace module' }}</h1><p>{{ descriptions[activeSlug] || 'A workflow module in the Northstar People roadmap.' }}</p></div><span class="status-pill" :class="moduleBySlug?.delivery === 'Planned' ? 'status-planned' : 'status-foundation'">{{ moduleBySlug?.delivery || 'Planned' }}</span></section>
@@ -4207,6 +4358,18 @@ onUnmounted(() => {
                 <label v-if="managerReviewDecision === 'approved'" class="manager-review-check"><input v-model="managerReviewAcknowledged" type="checkbox" required><span>I reviewed the dates and balance, and confirm this is a leave decision for my direct report.</span></label>
                 <div v-if="managerReviewError" class="inline-error" role="alert">{{ managerReviewError }}</div>
                 <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="managerReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (managerReviewDecision === 'approved' && !managerReviewAcknowledged) || (managerReviewDecision === 'rejected' && !managerReviewNote.trim())">{{ busy ? 'Saving…' : managerReviewDecision === 'approved' ? 'Confirm approval' : 'Confirm decline' }}</button></div>
+            </form>
+        </dialog>
+        <dialog v-if="expenseReviewOpen && selectedExpenseClaim" ref="expenseReviewDialog" class="recruitment-hire-dialog expense-review-dialog" role="alertdialog" aria-modal="true" aria-labelledby="expense-review-title" @close="closeExpenseReview">
+            <form class="recruitment-hire-form" @submit.prevent="submitExpenseReview">
+                <span class="recruitment-hire-symbol">{{ expenseReviewDecision === 'approve' ? '✓' : '−' }}</span>
+                <span class="eyebrow">EXPENSE CLAIM DECISION</span>
+                <h2 id="expense-review-title">{{ expenseReviewDecision === 'approve' ? 'Approve this expense claim?' : 'Reject this expense claim?' }}</h2>
+                <p>{{ selectedExpenseClaim.employee_name }} · {{ selectedExpenseClaim.merchant }} · {{ selectedExpenseClaim.currency }} {{ Number(selectedExpenseClaim.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }}.</p>
+                <p v-if="expenseReviewDecision === 'approve'">This records an internal approval only. It does not confirm policy compliance, reimbursement, or payment.</p>
+                <label>{{ expenseReviewDecision === 'approve' ? 'Reviewer note (optional)' : 'Reason for rejection' }}<textarea v-model.trim="expenseReviewNote" rows="3" maxlength="2000" :required="expenseReviewDecision === 'reject'" placeholder="Document the decision for the employee"></textarea></label>
+                <div v-if="expenseReviewError" class="inline-error" role="alert">{{ expenseReviewError }}</div>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="expenseReviewDialog?.close()">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (expenseReviewDecision === 'reject' && !expenseReviewNote.trim())">{{ busy ? 'Saving…' : expenseReviewDecision === 'approve' ? 'Confirm approval' : 'Confirm rejection' }}</button></div>
             </form>
         </dialog>
         <dialog v-if="selectedCandidate" ref="hireDialog" class="recruitment-hire-dialog" aria-labelledby="hire-dialog-title" @close="closeHireDialog">

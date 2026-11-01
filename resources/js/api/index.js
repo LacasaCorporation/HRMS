@@ -5,12 +5,13 @@ export function setCsrfToken(token) {
 }
 
 function request(path, options) {
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     return fetch(`/api${path}`, {
         ...options,
         credentials: 'same-origin',
         headers: {
             Accept: 'application/json',
-            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.body && !isFormData ? { 'Content-Type': 'application/json' } : {}),
             ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
             ...(options.headers || {}),
         },

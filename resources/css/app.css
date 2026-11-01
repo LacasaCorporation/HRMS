@@ -1824,3 +1824,68 @@ textarea { resize: vertical; }
     .growth-toolbar-filters select { width: 100%; }
     .training-detail-facts { grid-template-columns: 1fr; }
 }
+
+.expense-heading { align-items: center; margin-bottom: 14px; }
+.expense-heading h1 { text-wrap: balance; }
+.expense-heading > .button { flex: 0 0 auto; }
+.expense-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.expense-total-value { overflow-wrap: anywhere; font-size: 15px !important; }
+.expense-workspace { overflow: hidden; }
+.expense-form { margin: 14px; }
+.expense-file-name { overflow: hidden; color: #64766c; font-size: 8px; text-overflow: ellipsis; }
+.expense-toolbar { display: flex; min-height: 60px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #edf1ef; }
+.expense-filters { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 8px; }
+.expense-filters select { min-height: 32px; padding: 0 25px 0 9px; border: 1px solid #e1e9e3; border-radius: 6px; background: #fff; color: #5e7065; font-size: 8px; }
+.expense-truncation-note { padding: 9px 14px; border-bottom: 1px solid #edf1ef; background: #fafbf9; color: #75847c; font-size: 8px; }
+.expense-claim-list { display: grid; }
+.expense-claim-card { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 14px; border-bottom: 1px solid #edf1ef; }
+.expense-claim-card:last-child { border-bottom: 0; }
+.expense-claim-main { display: flex; min-width: 0; flex: 1; align-items: flex-start; gap: 11px; }
+.expense-category-mark { display: grid; width: 35px; height: 35px; flex: 0 0 35px; place-items: center; border-radius: 9px; background: #e8f4ee; color: #348167; font-size: 15px; }
+.expense-claim-copy { display: grid; min-width: 0; gap: 4px; }
+.expense-claim-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.expense-claim-title h2 { overflow: hidden; margin: 0; color: #31443b; font-family: Manrope, sans-serif; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.expense-claim-copy > p { margin: 0; color: #839087; font-size: 8px; line-height: 1.5; text-wrap: pretty; }
+.expense-claim-copy > .expense-description { color: #5e7065; }
+.expense-review-note { color: #956f40; font-size: 8px; line-height: 1.45; }
+.expense-claim-side { display: flex; min-width: 120px; flex-direction: column; align-items: flex-end; gap: 6px; }
+.expense-claim-side > b { color: #2e4339; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.expense-receipt-link { color: #28735f; font-size: 8px; font-weight: 700; text-decoration: none; }
+.expense-receipt-link:hover { text-decoration: underline; }
+.expense-no-receipt, .expense-pending-copy { color: #95a099; font-size: 7px; }
+.expense-review-actions { display: flex; gap: 5px; }
+.expense-review-actions .button { min-height: 28px; padding: 0 8px; font-size: 7px; }
+.expense-empty-state { display: grid; min-height: 210px; justify-items: center; align-content: center; gap: 8px; padding: 22px; text-align: center; }
+.expense-empty-state > b { color: #475b50; font-size: 11px; }
+.expense-empty-state > p { max-width: 390px; margin: 0 0 5px; color: #8a9790; font-size: 8px; line-height: 1.5; text-wrap: pretty; }
+.expense-boundary-note { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 0; padding: 10px 12px; border: 1px solid #e9eee9; border-radius: 7px; background: #f7f9f7; color: #78867d; font-size: 8px; line-height: 1.5; text-wrap: pretty; }
+.expense-boundary-note > span { flex: 0 0 auto; color: #48836e; }
+.expense-review-dialog { width: min(440px, calc(100vw - 28px)); }
+
+@media (max-width: 1100px) {
+    .expense-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+    .expense-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .expense-heading > .button { width: 100%; }
+    .expense-toolbar { align-items: stretch; flex-direction: column; gap: 6px; padding: 10px; }
+    .expense-toolbar .growth-tabs { min-height: 38px; overflow-x: auto; }
+    .expense-filters { width: 100%; }
+    .expense-filters select { flex: 0 0 120px; }
+    .expense-filters .growth-search { flex: 1; width: auto; }
+    .expense-claim-card { align-items: flex-start; }
+    .expense-claim-side { min-width: 105px; }
+}
+@media (max-width: 440px) {
+    .expense-metrics { gap: 7px; }
+    .expense-metrics > article { min-height: 72px; padding: 8px; }
+    .expense-metrics .growth-metric-icon { width: 28px; height: 28px; flex-basis: 28px; }
+    .expense-total-value { font-size: 12px !important; }
+    .expense-claim-card { flex-direction: column; gap: 10px; }
+    .expense-claim-side { width: 100%; min-width: 0; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; padding-left: 46px; }
+    .expense-claim-side > b { margin-right: auto; }
+    .expense-claim-side .expense-review-actions { width: 100%; }
+    .expense-review-actions .button { flex: 1; }
+    .expense-claim-title { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .expense-claim-title h2 { max-width: 230px; }
+}
