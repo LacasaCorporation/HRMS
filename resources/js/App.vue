@@ -14,6 +14,32 @@ const attendanceReport = ref({
     metrics: { entries: 0, completed: 0, working: 0, hours: 0, average_hours: 0 },
     trend: [],
 });
+const filteredAssetInventory = computed(() => {
+    const query = assetUniformSearch.value.trim().toLowerCase();
+    return assetUniformData.value.assets.filter((asset) => {
+        const matchesStatus = assetUniformStatusFilter.value === 'all' || asset.status === assetUniformStatusFilter.value;
+        const matchesSearch = !query || [
+            asset.asset_tag, asset.name, asset.category, asset.serial_number, asset.status,
+            asset.current_assignment?.employee?.first_name, asset.current_assignment?.employee?.last_name,
+            asset.current_assignment?.employee?.employee_code,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesStatus && matchesSearch;
+    });
+});
+const selectedAssetLossAssignment = computed(() => assetUniformData.value.assignments
+    .find((assignment) => assignment.id === assetLossConfirmId.value) || null);
+const filteredAssetAssignments = computed(() => {
+    const query = assetUniformSearch.value.trim().toLowerCase();
+    return assetUniformData.value.assignments.filter((assignment) => {
+        const matchesStatus = assetUniformStatusFilter.value === 'all' || assignment.status === assetUniformStatusFilter.value;
+        const matchesSearch = !query || [
+            assignment.asset?.asset_tag, assignment.asset?.name, assignment.asset?.category,
+            assignment.employee?.first_name, assignment.employee?.last_name, assignment.employee?.employee_code,
+            assignment.status, assignment.return_condition,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesStatus && matchesSearch;
+    });
+});
 const attendanceFrom = ref(localDateInput(new Date(Date.now() - 6 * 86400000)));
 const attendanceTo = ref(localDateInput(new Date()));
 const attendanceSearch = ref('');
@@ -102,6 +128,31 @@ const safetyActionId = ref(null);
 const safetyActionType = ref('');
 const safetyActionForm = ref({ assigned_to: '', action_plan: '', resolution_summary: '' });
 const safetyActionError = ref('');
+const assetUniformData = ref({
+    view: 'inventory', assets: [], assignments: [], employees: [],
+    meta: { total: 0, available: 0, pending_acknowledgement: 0, assigned: 0, maintenance: 0, lost: 0, can_manage: false },
+});
+const assetUniformTab = ref('inventory');
+const assetUniformSearch = ref('');
+const assetUniformStatusFilter = ref('all');
+const assetUniformFormOpen = ref(false);
+const assetUniformForm = ref({ asset_tag: '', name: '', category: 'equipment', serial_number: '', condition: 'new', notes: '' });
+const assetUniformFormError = ref('');
+const assetAssignId = ref(null);
+const assetAssignForm = ref({ employee_id: '' });
+const assetAssignError = ref('');
+const assetHandoverActionId = ref(null);
+const assetHandoverActionForm = ref({ decision: 'accept', note: '' });
+const assetHandoverActionError = ref('');
+const assetReturnId = ref(null);
+const assetReturnForm = ref({ return_condition: 'good', return_notes: '' });
+const assetReturnError = ref('');
+const assetLossConfirmDialog = ref(null);
+const assetLossConfirmOpen = ref(false);
+const assetLossConfirmId = ref(null);
+const assetMaintenanceId = ref(null);
+const assetMaintenanceForm = ref({ condition: 'good', maintenance_note: '' });
+const assetMaintenanceError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -335,7 +386,7 @@ const descriptions = {
     travel: 'Submit business travel requests, record itinerary details, and reconcile post-trip reports.',
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
     'health-safety': 'Restricted, company/branch-scoped incident, hazard, inspection, and PPE records with assigned manual follow-up and documented resolution.',
-    'assets-uniforms': 'Assignment, handover, return, condition, uniforms, and PPE records.',
+    'assets-uniforms': 'Track tagged equipment, uniforms, and PPE; route handovers for employee acknowledgement and record returns or loss.',
     documents: 'Private employee records with controlled uploads, access, and expiry tracking.',
     'separation-settlement': 'Prepare offboarding-linked settlement workpapers with manual lines, completed clearances, and recorded review.',
     reports: 'Permission-aware views and exports based on persisted domain data.',
@@ -369,7 +420,7 @@ const stagedScope = {
     travel: 'Travel requests, manager/HR decisions, itinerary notes, approved budget ceilings, and manual post-trip report reconciliation are available. No booking or reimbursement is initiated.',
     disciplinary: 'Restricted, company/branch-scoped case intake, investigation, employee-response recording, and manual resolution tracking for HR/admin.',
     'health-safety': 'Restricted HR/admin intake, manually entered priority, scoped assignment, action tracking, and documented resolution. No medical details or automated risk/compliance assessments are recorded.',
-    'assets-uniforms': 'Assignments, returns, uniform records, and ERP boundaries are staged.',
+    'assets-uniforms': 'Company/branch-scoped inventory, employee handover acknowledgement, returns, condition and loss notes, and assignment history are persisted. Fixed-asset accounting, purchasing, and ERP synchronization are not connected.',
     documents: 'Private file access, upload validation, expiry alerts, and retention controls are staged.',
     'separation-settlement': 'Settlement workpapers are linked to completed offboarding clearances. Earning and recovery lines are manually entered.',
     reports: 'A persisted dashboard is available. Filterable exports and advanced analytics are staged.',
@@ -742,6 +793,11 @@ watch(loanReviewOpen, async (open) => {
     await nextTick();
     if (loanReviewDialog.value && !loanReviewDialog.value.open) loanReviewDialog.value.showModal();
 });
+watch(assetLossConfirmOpen, async (open) => {
+    if (!open) return;
+    await nextTick();
+    if (assetLossConfirmDialog.value && !assetLossConfirmDialog.value.open) assetLossConfirmDialog.value.showModal();
+});
 watch(travelReviewOpen, async (open) => {
     if (!open) return;
     await nextTick();
@@ -970,13 +1026,11 @@ async function loadActive() {
         }
         if (activeSlug.value === 'health-safety' && canManageOrganization.value) {
             safetyData.value = await api('/health-safety');
-            if (!safetyForm.value.employee_id && safetyData.value.employees.length) {
-                safetyForm.value.employee_id = String(safetyData.value.employees[0].id);
-            }
             if (!safetyActionForm.value.assigned_to && safetyData.value.assignees.length) {
                 safetyActionForm.value.assigned_to = String(safetyData.value.assignees[0].id);
             }
         }
+        if (activeSlug.value === 'assets-uniforms') assetUniformData.value = await api('/assets-uniforms');
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -3364,7 +3418,7 @@ async function submitSafetyRecord() {
             location: '',
             priority: 'normal',
             summary: '',
-            employee_id: safetyData.value.employees[0]?.id ? String(safetyData.value.employees[0].id) : '',
+            employee_id: '',
         };
         safetyFormOpen.value = false;
         safetyTab.value = 'all';
@@ -3412,6 +3466,177 @@ async function submitSafetyAction(record) {
         await loadActive();
     } catch (requestError) {
         safetyActionError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function assetCategoryLabel(category) {
+    return { equipment: 'Equipment', uniform: 'Uniform', ppe: 'PPE', other: 'Other' }[category] || category;
+}
+
+function assetStatusLabel(status) {
+    return {
+        available: 'Available',
+        pending_acknowledgement: 'Awaiting acknowledgement',
+        assigned: 'Assigned',
+        maintenance: 'In maintenance',
+        lost: 'Reported lost',
+    }[status] || String(status || '').replaceAll('_', ' ');
+}
+
+function assetConditionLabel(condition) {
+    return { new: 'New', good: 'Good', fair: 'Fair', damaged: 'Damaged', lost: 'Lost' }[condition] || condition;
+}
+
+function assetAssignmentStatusLabel(status) {
+    return {
+        pending_acknowledgement: 'Awaiting acknowledgement',
+        assigned: 'Acknowledged',
+        declined: 'Declined',
+        returned: 'Returned',
+    }[status] || String(status || '').replaceAll('_', ' ');
+}
+
+async function submitAssetUniform() {
+    assetUniformFormError.value = '';
+    busy.value = true;
+    try {
+        await api('/assets-uniforms/assets', {
+            method: 'POST',
+            body: JSON.stringify(assetUniformForm.value),
+        });
+        assetUniformForm.value = { asset_tag: '', name: '', category: 'equipment', serial_number: '', condition: 'new', notes: '' };
+        assetUniformFormOpen.value = false;
+        assetUniformTab.value = 'inventory';
+        message('Inventory item registered and available for handover.');
+        await loadActive();
+    } catch (requestError) {
+        assetUniformFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openAssetAssignment(asset) {
+    assetAssignId.value = asset.id;
+    assetAssignForm.value = { employee_id: '' };
+    assetAssignError.value = '';
+}
+
+async function submitAssetAssignment(asset) {
+    assetAssignError.value = '';
+    busy.value = true;
+    try {
+        await api(`/assets-uniforms/assets/${asset.id}/assign`, {
+            method: 'POST',
+            body: JSON.stringify(assetAssignForm.value),
+        });
+        assetAssignId.value = null;
+        message('Handover sent. The employee must acknowledge receipt before the item is marked assigned.');
+        await loadActive();
+    } catch (requestError) {
+        assetAssignError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openAssetHandoverAction(assignment, decision) {
+    assetHandoverActionId.value = assignment.id;
+    assetHandoverActionForm.value = { decision, note: '' };
+    assetHandoverActionError.value = '';
+}
+
+async function submitAssetHandoverAction(assignment) {
+    assetHandoverActionError.value = '';
+    busy.value = true;
+    try {
+        await api(`/assets-uniforms/assignments/${assignment.id}/acknowledge`, {
+            method: 'POST',
+            body: JSON.stringify(assetHandoverActionForm.value),
+        });
+        const accepted = assetHandoverActionForm.value.decision === 'accept';
+        assetHandoverActionId.value = null;
+        message(accepted ? 'Receipt acknowledged. The asset is now assigned to you.' : 'Handover declined and the item returned to available inventory.');
+        await loadActive();
+    } catch (requestError) {
+        assetHandoverActionError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openAssetReturn(assignment) {
+    assetReturnId.value = assignment.id;
+    assetReturnForm.value = { return_condition: 'good', return_notes: '' };
+    assetReturnError.value = '';
+}
+
+async function submitAssetReturn(assignment) {
+    if (assetReturnForm.value.return_condition === 'lost') {
+        assetLossConfirmId.value = assignment.id;
+        assetLossConfirmOpen.value = true;
+        return;
+    }
+
+    await saveAssetReturn(assignment);
+}
+
+function closeAssetLossConfirm() {
+    assetLossConfirmOpen.value = false;
+    assetLossConfirmId.value = null;
+}
+
+async function confirmAssetLoss() {
+    const assignment = selectedAssetLossAssignment.value;
+    if (!assignment) return;
+    assetLossConfirmDialog.value?.close();
+    closeAssetLossConfirm();
+    await saveAssetReturn(assignment);
+}
+
+async function saveAssetReturn(assignment) {
+    assetReturnError.value = '';
+    busy.value = true;
+    try {
+        await api(`/assets-uniforms/assignments/${assignment.id}/return`, {
+            method: 'POST',
+            body: JSON.stringify(assetReturnForm.value),
+        });
+        assetReturnId.value = null;
+        message(assetReturnForm.value.return_condition === 'lost'
+            ? 'Loss recorded; the item is marked lost.'
+            : assetReturnForm.value.return_condition === 'damaged'
+                ? 'Return recorded; the item is in maintenance.'
+                : 'Return recorded and the item is available again.');
+        await loadActive();
+    } catch (requestError) {
+        assetReturnError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function openAssetMaintenance(asset) {
+    assetMaintenanceId.value = asset.id;
+    assetMaintenanceForm.value = { condition: 'good', maintenance_note: '' };
+    assetMaintenanceError.value = '';
+}
+
+async function submitAssetMaintenance(asset) {
+    assetMaintenanceError.value = '';
+    busy.value = true;
+    try {
+        await api(`/assets-uniforms/assets/${asset.id}/maintenance-complete`, {
+            method: 'POST',
+            body: JSON.stringify(assetMaintenanceForm.value),
+        });
+        assetMaintenanceId.value = null;
+        message('Maintenance recorded. The asset is available for a new handover.');
+        await loadActive();
+    } catch (requestError) {
+        assetMaintenanceError.value = requestError.message;
     } finally {
         busy.value = false;
     }
@@ -5198,6 +5423,113 @@ onUnmounted(() => {
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted HR workspace</b><p>Health and safety records are available only to HR and administrator accounts within their company or branch scope.</p></section>
                 </template>
 
+                <template v-else-if="activeSlug === 'assets-uniforms'">
+                    <template v-if="assetUniformData.meta.can_manage">
+                        <section class="page-heading assets-heading">
+                            <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> ASSETS &amp; UNIFORMS</span><h1>Every handover, accounted for.</h1><p>Keep a clear inventory, route employee acknowledgements, and close the loop when items come back.</p></div>
+                            <button class="button button-primary" @click="assetUniformFormOpen = !assetUniformFormOpen">{{ assetUniformFormOpen ? 'Close item form' : '＋ Register an item' }}</button>
+                        </section>
+                        <section class="growth-metrics assets-metrics" aria-label="Assets and uniforms summary">
+                            <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">TRACKED ITEMS</span><b>{{ assetUniformData.meta.total }}</b><small>Within your company or branch</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-complete">✓</span><div><span class="eyebrow">AVAILABLE</span><b>{{ assetUniformData.meta.available }}</b><small>Ready for a new handover</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">AWAITING RECEIPT</span><b>{{ assetUniformData.meta.pending_acknowledgement }}</b><small>Employee acknowledgement needed</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-overdue">↗</span><div><span class="eyebrow">ASSIGNED</span><b>{{ assetUniformData.meta.assigned }}</b><small>{{ assetUniformData.meta.maintenance }} in maintenance · {{ assetUniformData.meta.lost }} lost</small></div></article>
+                        </section>
+                        <section class="panel assets-workspace">
+                            <section v-if="assetUniformFormOpen" class="growth-form assets-form">
+                                <div class="growth-form-heading"><div><span class="eyebrow">INVENTORY REGISTER</span><h2>Add a tracked item.</h2><p>Register each individually tracked asset, uniform, or PPE item with a unique company tag.</p></div><button type="button" class="icon-button" aria-label="Close asset form" @click="assetUniformFormOpen = false; assetUniformFormError = ''">×</button></div>
+                                <form class="growth-form-grid" @submit.prevent="submitAssetUniform">
+                                    <label>Asset tag<input v-model.trim="assetUniformForm.asset_tag" maxlength="80" required placeholder="e.g. IT-042"></label>
+                                    <label>Item name<input v-model.trim="assetUniformForm.name" maxlength="180" required placeholder="e.g. Safety helmet"></label>
+                                    <label>Category<select v-model="assetUniformForm.category" required><option value="equipment">Equipment</option><option value="uniform">Uniform</option><option value="ppe">PPE</option><option value="other">Other</option></select></label>
+                                    <label>Serial number <span class="assets-optional">(optional)</span><input v-model.trim="assetUniformForm.serial_number" maxlength="120" placeholder="Manufacturer serial or batch"></label>
+                                    <label>Condition at registration<select v-model="assetUniformForm.condition" required><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option></select></label>
+                                    <label class="growth-field-wide">Inventory note <span class="assets-optional">(optional)</span><textarea v-model.trim="assetUniformForm.notes" rows="3" maxlength="2000" placeholder="Useful identifier or handover context"></textarea></label>
+                                    <div v-if="assetUniformFormError" class="inline-error growth-field-wide" role="alert">{{ assetUniformFormError }}</div>
+                                    <div class="growth-form-footer growth-field-wide"><span>Asset tags are unique within your company. No valuation, depreciation, or purchasing data is calculated.</span><div><button type="button" class="button button-soft" @click="assetUniformFormOpen = false">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Register item' }}</button></div></div>
+                                </form>
+                            </section>
+                            <div class="assets-toolbar">
+                                <nav class="growth-tabs" aria-label="Asset workspace views">
+                                    <button :class="{ active: assetUniformTab === 'inventory' }" @click="assetUniformTab = 'inventory'; assetUniformStatusFilter = 'all'">Inventory <span>{{ assetUniformData.meta.total }}</span></button>
+                                    <button :class="{ active: assetUniformTab === 'handovers' }" @click="assetUniformTab = 'handovers'; assetUniformStatusFilter = 'all'">Handover history <span>{{ assetUniformData.assignments.length }}</span></button>
+                                </nav>
+                                <select v-model="assetUniformStatusFilter" class="assets-status-filter" aria-label="Filter by status">
+                                    <option value="all">All statuses</option>
+                                    <template v-if="assetUniformTab === 'inventory'"><option value="available">Available</option><option value="pending_acknowledgement">Awaiting acknowledgement</option><option value="assigned">Assigned</option><option value="maintenance">In maintenance</option><option value="lost">Reported lost</option></template>
+                                    <template v-else><option value="pending_acknowledgement">Awaiting acknowledgement</option><option value="assigned">Acknowledged</option><option value="declined">Declined</option><option value="returned">Returned</option></template>
+                                </select>
+                                <label class="table-search growth-search"><span>⌕</span><input v-model="assetUniformSearch" aria-label="Search assets and handovers" placeholder="Search tag, item, employee"></label>
+                            </div>
+                            <div v-if="assetUniformData.meta.truncated" class="expense-truncation-note">Showing the latest {{ assetUniformData.meta.limit }} inventory items in your access scope.</div>
+                            <div v-if="assetUniformTab === 'inventory' && filteredAssetInventory.length" class="assets-list">
+                                <article v-for="asset in filteredAssetInventory" :key="asset.id" class="assets-card">
+                                    <div class="assets-card-header"><div><span class="eyebrow">{{ assetCategoryLabel(asset.category).toUpperCase() }} <span class="dot-separator">•</span> {{ asset.asset_tag }}</span><h2>{{ asset.name }}</h2><p>{{ asset.serial_number ? `Serial ${asset.serial_number} · ` : '' }}{{ assetConditionLabel(asset.condition) }} condition</p></div><span class="assets-status-pill" :class="`assets-status-${asset.status}`">{{ assetStatusLabel(asset.status) }}</span></div>
+                                    <p v-if="asset.notes" class="assets-note">{{ asset.notes }}</p>
+                                    <div v-if="asset.current_assignment?.employee" class="assets-holder"><span>Current handover</span><b>{{ asset.current_assignment.employee.first_name }} {{ asset.current_assignment.employee.last_name }} · {{ asset.current_assignment.employee.employee_code }}</b></div>
+                                    <div v-if="asset.maintenance_note" class="assets-maintenance-note"><b>Latest maintenance note</b><p>{{ asset.maintenance_note }}</p></div>
+                                    <div class="assets-actions">
+                                        <button v-if="asset.status === 'available'" class="button button-primary" :disabled="busy || !assetUniformData.employees.length" @click="openAssetAssignment(asset)">Assign to employee</button>
+                                        <button v-if="asset.status === 'maintenance'" class="button button-soft" :disabled="busy" @click="openAssetMaintenance(asset)">Complete maintenance</button>
+                                    </div>
+                                    <form v-if="assetAssignId === asset.id" class="assets-action-form" @submit.prevent="submitAssetAssignment(asset)">
+                                        <label>Handover to<select v-model="assetAssignForm.employee_id" required><option value="">Select an employee</option><option v-for="employee in assetUniformData.employees" :key="employee.id" :value="String(employee.id)">{{ employee.first_name }} {{ employee.last_name }} · {{ employee.employee_code }}</option></select></label>
+                                        <div v-if="assetAssignError" class="inline-error" role="alert">{{ assetAssignError }}</div>
+                                        <div class="assets-action-footer"><span>Employee acknowledgement is required before this item becomes assigned.</span><div><button type="button" class="button button-soft" @click="assetAssignId = null; assetAssignError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || !assetAssignForm.employee_id">{{ busy ? 'Sending…' : 'Send handover' }}</button></div></div>
+                                    </form>
+                                    <form v-if="assetMaintenanceId === asset.id" class="assets-action-form" @submit.prevent="submitAssetMaintenance(asset)">
+                                        <label>Condition after maintenance<select v-model="assetMaintenanceForm.condition" required><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option></select></label>
+                                        <label>Maintenance completed note<textarea v-model.trim="assetMaintenanceForm.maintenance_note" rows="2" maxlength="2000" required placeholder="Describe the work completed and condition checked"></textarea></label>
+                                        <div v-if="assetMaintenanceError" class="inline-error" role="alert">{{ assetMaintenanceError }}</div>
+                                        <div class="assets-action-footer"><span>Record the manual condition check before returning an item to inventory.</span><div><button type="button" class="button button-soft" @click="assetMaintenanceId = null; assetMaintenanceError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Release to inventory' }}</button></div></div>
+                                    </form>
+                                </article>
+                            </div>
+                            <div v-else-if="assetUniformTab === 'handovers' && filteredAssetAssignments.length" class="assets-list">
+                                <article v-for="assignment in filteredAssetAssignments" :key="assignment.id" class="assets-card">
+                                    <div class="assets-card-header"><div><span class="eyebrow">HANDOVER #{{ assignment.id }} <span class="dot-separator">•</span> {{ assignment.asset?.asset_tag }}</span><h2>{{ assignment.asset?.name || 'Inventory item' }}</h2><p>{{ assignment.employee?.first_name }} {{ assignment.employee?.last_name }} · {{ assignment.employee?.employee_code }} · Issued {{ formatDate(assignment.assigned_at) }}</p></div><span class="assets-status-pill" :class="`assets-assignment-${assignment.status}`">{{ assetAssignmentStatusLabel(assignment.status) }}</span></div>
+                                    <div class="assets-handover-details"><span>Condition at issue <b>{{ assetConditionLabel(assignment.condition_at_issue) }}</b></span><span v-if="assignment.acknowledged_at">Acknowledged <b>{{ formatDate(assignment.acknowledged_at) }}</b></span><span v-if="assignment.acknowledgement_note">Employee note <b>{{ assignment.acknowledgement_note }}</b></span><span v-if="assignment.declined_at">Declined <b>{{ formatDate(assignment.declined_at) }}</b></span><span v-if="assignment.returned_at">Returned <b>{{ formatDate(assignment.returned_at) }} · {{ assetConditionLabel(assignment.return_condition) }}</b></span><span v-if="assignment.return_notes">Return note <b>{{ assignment.return_notes }}</b></span></div>
+                                    <div v-if="assignment.status === 'assigned'" class="assets-actions"><button class="button button-primary" :disabled="busy" @click="openAssetReturn(assignment)">Record return or loss</button></div>
+                                    <form v-if="assetReturnId === assignment.id" class="assets-action-form" @submit.prevent="submitAssetReturn(assignment)">
+                                        <label>Condition at return<select v-model="assetReturnForm.return_condition" required><option value="new">New</option><option value="good">Good</option><option value="fair">Fair</option><option value="damaged">Damaged</option><option value="lost">Reported lost</option></select></label>
+                                        <label>Return / loss notes<textarea v-model.trim="assetReturnForm.return_notes" rows="2" maxlength="2000" :required="['damaged', 'lost'].includes(assetReturnForm.return_condition)" placeholder="Required for damage or loss"></textarea></label>
+                                        <div v-if="assetReturnError" class="inline-error" role="alert">{{ assetReturnError }}</div>
+                                        <div class="assets-action-footer"><span>Damaged items enter maintenance; a reported loss remains unavailable.</span><div><button type="button" class="button button-soft" @click="assetReturnId = null; assetReturnError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Record outcome' }}</button></div></div>
+                                    </form>
+                                </article>
+                            </div>
+                            <div v-else class="expense-empty-state"><span class="empty-icon">▤</span><b>{{ assetUniformSearch || assetUniformStatusFilter !== 'all' ? 'No items match these filters.' : assetUniformTab === 'handovers' ? 'No handovers recorded yet.' : 'Your inventory is ready to build.' }}</b><p>{{ assetUniformSearch || assetUniformStatusFilter !== 'all' ? 'Try another tag, item, employee, or status.' : assetUniformTab === 'handovers' ? 'Every assignment, acknowledgement, decline, and return will be recorded here.' : 'Register a tagged item before assigning it to an employee.' }}</p><button v-if="assetUniformTab === 'inventory' && !assetUniformSearch && assetUniformStatusFilter === 'all' && !assetUniformFormOpen" class="button button-primary" @click="assetUniformFormOpen = true">Register first item</button><button v-else-if="assetUniformSearch || assetUniformStatusFilter !== 'all'" class="button button-soft" @click="assetUniformSearch = ''; assetUniformStatusFilter = 'all'">Clear filters</button></div>
+                        </section>
+                        <p class="expense-boundary-note"><span>ⓘ</span> Handover and condition records only. No purchasing, valuation, depreciation, payroll chargeback, fixed-asset accounting, or ERP synchronization is performed.</p>
+                    </template>
+                    <template v-else-if="user.role === 'employee'">
+                        <section class="page-heading assets-heading"><div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> MY ASSETS</span><h1>What’s in your care.</h1><p>Review items handed to you and confirm receipt so the record is clear for everyone.</p></div></section>
+                        <section class="growth-metrics assets-metrics" aria-label="My asset handovers">
+                            <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">ITEMS IN YOUR CARE</span><b>{{ assetUniformData.meta.assigned }}</b><small>Acknowledged handovers</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">NEED YOUR RESPONSE</span><b>{{ assetUniformData.meta.pending_acknowledgement }}</b><small>Review the condition before accepting</small></div></article>
+                        </section>
+                        <section class="panel assets-workspace">
+                            <div v-if="filteredAssetAssignments.length" class="assets-list">
+                                <article v-for="assignment in filteredAssetAssignments" :key="assignment.id" class="assets-card">
+                                    <div class="assets-card-header"><div><span class="eyebrow">{{ assetCategoryLabel(assignment.asset?.category).toUpperCase() }} <span class="dot-separator">•</span> {{ assignment.asset?.asset_tag }}</span><h2>{{ assignment.asset?.name }}</h2><p>{{ assignment.asset?.serial_number ? `Serial ${assignment.asset.serial_number} · ` : '' }}Issued {{ formatDate(assignment.assigned_at) }}</p></div><span class="assets-status-pill" :class="`assets-assignment-${assignment.status}`">{{ assetAssignmentStatusLabel(assignment.status) }}</span></div>
+                                    <div class="assets-handover-details"><span>Condition at issue <b>{{ assetConditionLabel(assignment.condition_at_issue) }}</b></span><span v-if="assignment.acknowledgement_note">Your response <b>{{ assignment.acknowledgement_note }}</b></span></div>
+                                    <div v-if="assignment.status === 'pending_acknowledgement'" class="assets-actions"><button class="button button-soft" :disabled="busy" @click="openAssetHandoverAction(assignment, 'decline')">Decline handover</button><button class="button button-primary" :disabled="busy" @click="openAssetHandoverAction(assignment, 'accept')">Acknowledge receipt</button></div>
+                                    <form v-if="assetHandoverActionId === assignment.id" class="assets-action-form" @submit.prevent="submitAssetHandoverAction(assignment)">
+                                        <p>{{ assetHandoverActionForm.decision === 'accept' ? 'Confirm that you received this item in the listed condition.' : 'A reason is required so HR can correct the handover.' }}</p>
+                                        <label v-if="assetHandoverActionForm.decision === 'decline'">Reason for declining<textarea v-model.trim="assetHandoverActionForm.note" rows="2" maxlength="2000" required placeholder="Explain what needs to be corrected"></textarea></label>
+                                        <label v-else>Optional acknowledgement note<textarea v-model.trim="assetHandoverActionForm.note" rows="2" maxlength="2000" placeholder="Add a note about the received item"></textarea></label>
+                                        <div v-if="assetHandoverActionError" class="inline-error" role="alert">{{ assetHandoverActionError }}</div>
+                                        <div class="assets-action-footer"><span>Only acknowledge items you have actually received.</span><div><button type="button" class="button button-soft" @click="assetHandoverActionId = null; assetHandoverActionError = ''">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || (assetHandoverActionForm.decision === 'decline' && !assetHandoverActionForm.note.trim())">{{ busy ? 'Saving…' : assetHandoverActionForm.decision === 'accept' ? 'Confirm receipt' : 'Send decline' }}</button></div></div>
+                                    </form>
+                                </article>
+                            </div>
+                            <div v-else class="expense-empty-state"><span class="empty-icon">✓</span><b>{{ assetUniformSearch ? 'No handovers match your search.' : 'No items currently assigned to you.' }}</b><p>{{ assetUniformSearch ? 'Try another asset tag or item name.' : 'New handovers from HR will appear here for acknowledgement.' }}</p></div>
+                        </section>
+                        <p class="expense-boundary-note"><span>ⓘ</span> Acknowledgement confirms receipt only. This page does not calculate deductions, replacement costs, or ownership.</p>
+                    </template>
+                    <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted asset workspace</b><p>Inventory administration is limited to HR and administrators. Employees can acknowledge only their own active handovers.</p></section>
+                </template>
+
                 <template v-else>
                     <section class="page-heading module-heading"><div><span class="eyebrow">{{ moduleBySlug?.area || 'WORKSPACE' }} <span class="dot-separator">•</span> MODULE OVERVIEW</span><h1>{{ moduleBySlug?.name || 'Workspace module' }}</h1><p>{{ descriptions[activeSlug] || 'A workflow module in the Northstar People roadmap.' }}</p></div><span class="status-pill" :class="moduleBySlug?.delivery === 'Planned' ? 'status-planned' : 'status-foundation'">{{ moduleBySlug?.delivery || 'Planned' }}</span></section>
                     <section class="module-feature-grid"><article class="panel module-status-card"><span class="module-status-icon">✳</span><span class="eyebrow">DELIVERY TRACKER</span><h2>{{ moduleBySlug?.delivery === 'Planned' ? 'Planned — not yet implemented' : 'Foundation slice delivered' }}</h2><p>{{ stagedScope[activeSlug] || 'This module is in the approved enterprise scope. It will be delivered in a later increment with persisted data, authorization, and workflow tests.' }}</p><div class="module-divider"></div><div class="module-meta"><span>DATA STATUS</span><b>{{ moduleBySlug?.delivery === 'Planned' ? 'No workflow data is simulated' : 'Company-scoped foundation' }}</b></div><div class="module-meta"><span>INTEGRATIONS</span><b>Not connected</b></div></article><article class="panel roadmap-list"><span class="eyebrow">NEXT DELIVERY INCREMENTS</span><h2>From foundation to full workflow</h2><div class="roadmap-item"><span class="roadmap-index">01</span><span><b>People & organization</b><small>Profiles, document expiry, recruiting, onboarding, and org structure</small></span><span class="status-pill status-planned">Next</span></div><div class="roadmap-item"><span class="roadmap-index">02</span><span><b>Time & absence</b><small>Roster rules, holidays, corrections, overtime, and leave policies</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">03</span><span><b>Compensation & finance</b><small>Payroll controls, settlement, benefits, loans, expenses, and WPS exports</small></span><span class="status-pill status-planned">Planned</span></div><div class="roadmap-item"><span class="roadmap-index">04</span><span><b>Growth, compliance & integrations</b><small>Performance, training, employee relations, advanced planning, and ERP contracts</small></span><span class="status-pill status-planned">Planned</span></div><div class="integration-note"><span>ⓘ</span><p>External providers, banking, biometrics, and ERP connections remain disabled until authorized credentials, privacy review, and a test environment are available.</p></div></article></section>
@@ -5205,6 +5537,16 @@ onUnmounted(() => {
                 <footer class="page-footer"><span>Northstar People <i>•</i> Local development foundation</span><span>Synthetic records only · {{ user.company?.name }}</span></footer>
             </div>
         </main>
+        <dialog v-if="assetLossConfirmOpen && selectedAssetLossAssignment" ref="assetLossConfirmDialog" class="recruitment-hire-dialog asset-loss-dialog" role="alertdialog" aria-modal="true" aria-labelledby="asset-loss-title" @close="closeAssetLossConfirm">
+            <div class="recruitment-hire-form">
+                <span class="recruitment-hire-symbol">!</span>
+                <span class="eyebrow">INVENTORY STATUS CHANGE</span>
+                <h2 id="asset-loss-title">Report this item lost?</h2>
+                <p>{{ selectedAssetLossAssignment.asset?.asset_tag }} · {{ selectedAssetLossAssignment.asset?.name }} will be marked lost and made unavailable for future handovers.</p>
+                <p>This records an internal inventory status only. It does not calculate replacement costs, deductions, or ownership.</p>
+                <div class="recruitment-hire-actions"><button type="button" class="button button-soft" @click="assetLossConfirmDialog?.close()">Go back</button><button type="button" class="button button-primary" :disabled="busy" @click="confirmAssetLoss">{{ busy ? 'Saving…' : 'Confirm loss' }}</button></div>
+            </div>
+        </dialog>
         <dialog v-if="managerReviewOpen && selectedManagerRequest" ref="managerReviewDialog" class="recruitment-hire-dialog manager-leave-review-dialog" role="alertdialog" aria-modal="true" aria-labelledby="manager-leave-review-title" @close="closeManagerLeaveReview">
             <form class="recruitment-hire-form" @submit.prevent="submitManagerLeaveReview">
                 <span class="recruitment-hire-symbol">{{ managerReviewDecision === 'approved' ? '✓' : '−' }}</span>

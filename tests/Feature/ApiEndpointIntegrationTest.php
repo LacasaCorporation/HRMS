@@ -111,6 +111,12 @@ class ApiEndpointIntegrationTest extends TestCase
             ['POST', '/api/health-safety/records'],
             ['POST', '/api/health-safety/records/1/assign'],
             ['POST', '/api/health-safety/records/1/resolve'],
+            ['GET', '/api/assets-uniforms'],
+            ['POST', '/api/assets-uniforms/assets'],
+            ['POST', '/api/assets-uniforms/assets/1/assign'],
+            ['POST', '/api/assets-uniforms/assets/1/maintenance-complete'],
+            ['POST', '/api/assets-uniforms/assignments/1/acknowledge'],
+            ['POST', '/api/assets-uniforms/assignments/1/return'],
             ['GET', '/api/organization'],
             ['POST', '/api/organization/departments'],
             ['PATCH', '/api/organization/departments/1'],
@@ -200,7 +206,8 @@ class ApiEndpointIntegrationTest extends TestCase
             ->assertJsonFragment(['slug' => 'loans-advances', 'delivery' => 'Foundation slice'])
             ->assertJsonFragment(['slug' => 'travel', 'delivery' => 'Foundation slice'])
             ->assertJsonFragment(['slug' => 'disciplinary', 'delivery' => 'Foundation slice'])
-            ->assertJsonFragment(['slug' => 'health-safety', 'delivery' => 'Foundation slice']);
+            ->assertJsonFragment(['slug' => 'health-safety', 'delivery' => 'Foundation slice'])
+            ->assertJsonFragment(['slug' => 'assets-uniforms', 'delivery' => 'Foundation slice']);
         $this->getJson('/api/dashboard')
             ->assertOk()
             ->assertJsonPath('metrics.employees', 2);

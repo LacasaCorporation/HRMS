@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\AssetsUniformsController;
 use App\Http\Controllers\BenefitsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DisciplinaryController;
@@ -57,6 +58,12 @@ Route::prefix('api')->group(function () {
         Route::post('/health-safety/records', [HealthSafetyController::class, 'store']);
         Route::post('/health-safety/records/{record}/assign', [HealthSafetyController::class, 'assign']);
         Route::post('/health-safety/records/{record}/resolve', [HealthSafetyController::class, 'resolve']);
+        Route::get('/assets-uniforms', [AssetsUniformsController::class, 'index']);
+        Route::post('/assets-uniforms/assets', [AssetsUniformsController::class, 'store']);
+        Route::post('/assets-uniforms/assets/{asset}/assign', [AssetsUniformsController::class, 'assign']);
+        Route::post('/assets-uniforms/assets/{asset}/maintenance-complete', [AssetsUniformsController::class, 'completeMaintenance']);
+        Route::post('/assets-uniforms/assignments/{assignment}/acknowledge', [AssetsUniformsController::class, 'acknowledge']);
+        Route::post('/assets-uniforms/assignments/{assignment}/return', [AssetsUniformsController::class, 'recordReturn']);
         Route::get('/organization', [OrganizationController::class, 'index']);
         Route::post('/organization/departments', [OrganizationController::class, 'storeDepartment']);
         Route::patch('/organization/departments/{department}', [OrganizationController::class, 'updateDepartment']);
