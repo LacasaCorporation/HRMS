@@ -47,7 +47,7 @@ return new class extends Migration
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
             $table->unique(['benefit_plan_id', 'employee_code', 'effective_start'], 'benefit_enrollment_start_unique');
-            $table->index(['company_id', 'branch_id', 'status', 'effective_start']);
+            $table->index(['company_id', 'branch_id', 'status', 'effective_start'], 'benefit_enrollments_scope_status_start_idx');
         });
 
         Schema::create('separation_settlements', function (Blueprint $table) {
@@ -80,7 +80,7 @@ return new class extends Migration
             $table->decimal('amount', 12, 2);
             $table->text('notes')->nullable();
             $table->timestamps();
-            $table->index(['separation_settlement_id', 'category']);
+            $table->index(['separation_settlement_id', 'category'], 'separation_items_settlement_category_idx');
         });
     }
 

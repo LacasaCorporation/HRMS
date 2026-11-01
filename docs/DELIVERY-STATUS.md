@@ -13,6 +13,8 @@
 - Persisted Attendance workspace: date-range, employee-search, and shift-status reporting; daily activity trend and worked-hour metrics; pagination and filtered CSV export; and personal check-in/out status. The report endpoint preserves the legacy attendance list response.
 - Persisted Shift & Roster foundation: reusable branch-aware shift patterns (including overnight hours), scoped weekly roster assignments, duplicate employee/day protection, approved-leave conflict checks, upcoming assignment removal, pattern archive guards, and CSV export.
 - Persisted Payroll workflow foundation: HR/admin-only company/branch-scoped cycles, explicit employee inclusion, manual currency-specific inputs, arithmetic totals, review/return/approval history, locked submitted inputs, and CSV workpaper export.
+- Persisted Benefits foundation: HR/admin-only plan settings, branch/company scope, employee enrollment records, manually entered currency-matched contribution amounts, review/return/decline/approval/end decisions, and filtered CSV workpapers. No eligibility or country-specific contribution rules are inferred.
+- Persisted Separation foundation: HR/admin-only workpapers linked to offboarding cases, manual earning/recovery lines, arithmetic-only totals, clearance-gated submission, review/return/approval decisions, and CSV export. Approval does not initiate settlement or payment.
 - Company-scoped dashboard aggregates and append-only-by-application audit event recording.
 - Synthetic data only. Demo identities are documented in the root README.
 
@@ -22,9 +24,9 @@ The module catalog exposes all 24 approved core modules and 13 advanced modules.
 
 1. **People and organization:** full employee profile and history, private documents and expiry, position lifecycle beyond planning/assignment, and dashboard drill-downs. Recruitment covers internal requisitions and candidate stages only; job-board publishing, email/calendar, background checks, resume storage, and employee account provisioning remain staged.
 2. **Time and absence:** holiday calendars, automated rotations, weekly-off rules, swap approvals, attendance schedule enforcement, correction/missing-punch approvals, overtime/timesheets, accrual/carry-forward, and expanded employee/manager self-service. Reusable shift patterns and manual weekly roster assignment are implemented.
-3. **Compensation and finance:** approved salary structures and statutory payroll calculations, payroll processing, payslips, loans, benefits, expenses, travel, WPS/SIF generation, and accounting/bank-file contracts. The current payroll foundation stores manually entered workpapers and records review decisions only.
+3. **Compensation and finance:** approved salary structures and statutory payroll calculations, payroll processing, payslips, loans, expenses, travel, WPS/SIF generation, and accounting/bank-file contracts. Payroll and Benefits currently store manual workpapers and review decisions only; Benefits does not infer eligibility or contribution rates.
 4. **Growth and employee relations:** performance, training, helpdesk, engagement, discipline, health/safety, assets/uniforms, and secure document workflows.
-5. **Separation, advanced planning, reporting, and integration contracts:** settlement/EOSB, workforce planning/productivity/succession/career, labor-cost allocation, compliance/analytics, and ERP adapters.
+5. **Separation, advanced planning, reporting, and integration contracts:** legal settlement/EOSB and statutory calculations, workforce planning/productivity/succession/career, labor-cost allocation, compliance/analytics, and ERP adapters. The current Separation slice is a clearance-linked manual workpaper, not a legal calculator or payment workflow.
 
 All legal calculations (including UAE leave, payroll, gratuity/EOSB, and WPS formats) require customer/legal validation before production. External integrations remain inactive pending authorized credentials, privacy review, and a test environment.
 
@@ -38,6 +40,8 @@ All legal calculations (including UAE leave, payroll, gratuity/EOSB, and WPS for
 - Attendance has no correction approval, schedule validation, late/early policy, or overtime computation.
 - Shift & Roster is a manual planning workspace. It does not enforce attendance against schedules and has no holiday calendars, weekly-off rules, automated rotations, swap approvals, or overtime calculations.
 - Payroll stores manually entered base pay, other earnings, and manual deductions for each selected employee. Gross/net are arithmetic only; no statutory tax, pension, insurance, overtime, EOSB, payslip, WPS/SIF, payment, or bank/accounting export is implemented. Approval records a review decision and does not mark the cycle as paid. Country rules require customer/legal validation before production use.
+- Benefits stores configurable plan metadata and manually supplied contributions. It does not determine employee eligibility, legal contribution rates, tax treatment, deductions, provider coverage, or payment status. Plan currency cannot change once enrollments exist; the selected employee currency must match the plan.
+- Separation stores manually entered earning/recovery lines and their arithmetic total, linked to a completed offboarding checklist. It does not calculate EOSB/gratuity, leave encashment, notice, tax, loans, statutory deductions, or final pay; approval is not a payment instruction.
 - Attendance reports allow date windows of up to 93 days and paginate up to 500 rows per page; worked hours are calculated only from recorded punch times.
 - Audit events are insert-only through the application service; database-level immutability and audit export controls are not yet configured.
 - The synthetic demo seeder is idempotent and intended for local development only.

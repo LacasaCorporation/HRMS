@@ -31,6 +31,11 @@ class BenefitEnrollment extends Model
         return $this->belongsTo(BenefitPlan::class, 'benefit_plan_id');
     }
 
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function employee()
     {
         return $this->belongsTo(Employee::class);

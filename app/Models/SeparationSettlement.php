@@ -26,6 +26,11 @@ class SeparationSettlement extends Model
         return $this->belongsTo(LifecycleCase::class, 'lifecycle_case_id');
     }
 
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function employee()
     {
         return $this->belongsTo(Employee::class);
