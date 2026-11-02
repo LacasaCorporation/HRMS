@@ -6,6 +6,24 @@ const user = ref(null);
 const activeSlug = ref('dashboard');
 const modules = ref([]);
 const dashboard = ref(null);
+const reportsData = ref({
+    meta: { from: '', to: '', attendance_total: 0, attendance_limit: 500, attendance_truncated: false, employees_total: 0, leave_total: 0 },
+    metrics: { employees: 0, active_employees: 0, new_hires: 0, attendance_entries: 0, completed_shifts: 0, working_now: 0, hours_recorded: 0, average_shift_hours: 0, pending_leave: 0 },
+    trend: [], departments: [], leave_status: [], attendance_rows: [],
+});
+const reportFrom = ref(localDateInput(new Date(Date.now() - 29 * 86400000)));
+const reportTo = ref(localDateInput(new Date()));
+const reportDepartment = ref('all');
+const reportSearch = ref('');
+const reportError = ref('');
+const reportsExporting = ref(false);
+const hrSettingsData = ref({ company: { name: '', country: '', currency: '', branches: [] }, leave_types: [], meta: {} });
+const hrSettingsCompanyForm = ref({ name: '', country: '', currency: '' });
+const hrSettingsLeaveDrafts = ref({});
+const hrSettingsLeaveForm = ref({ name: '', annual_entitlement: 20, is_paid: true, is_active: true });
+const hrSettingsFormOpen = ref(false);
+const hrSettingsCompanyError = ref('');
+const hrSettingsLeaveError = ref('');
 const employees = ref([]);
 const attendance = ref([]);
 const attendanceToday = ref(null);
@@ -24,6 +42,18 @@ const filteredAssetInventory = computed(() => {
             asset.current_assignment?.employee?.employee_code,
         ].some((value) => String(value || '').toLowerCase().includes(query));
         return matchesStatus && matchesSearch;
+    });
+});
+const filteredEmployeeDocuments = computed(() => {
+    const query = employeeDocumentsSearch.value.trim().toLowerCase();
+    return employeeDocumentsData.value.documents.filter((document) => {
+        const statusMatches = employeeDocumentsFilter.value === 'all' || document.expiry_status === employeeDocumentsFilter.value;
+        const searchMatches = !query || [
+            document.title, document.category, document.employee?.first_name, document.employee?.last_name,
+            document.employee?.employee_code, document.employee?.department, document.notes,
+            ...document.versions.map((version) => version.original_name),
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return statusMatches && searchMatches;
     });
 });
 const selectedAssetLossAssignment = computed(() => assetUniformData.value.assignments
@@ -45,6 +75,20 @@ const attendanceTo = ref(localDateInput(new Date()));
 const attendanceSearch = ref('');
 const attendanceStatusFilter = ref('all');
 const attendanceExporting = ref(false);
+const reportFilteredDepartments = computed(() => reportDepartment.value === 'all'
+    ? reportsData.value.departments
+    : reportsData.value.departments.filter((department) => department.name === reportDepartment.value));
+const reportMaxDepartmentCount = computed(() => Math.max(1, ...reportsData.value.departments.map((department) => department.count)));
+const reportFilteredRows = computed(() => {
+    const query = reportSearch.value.trim().toLowerCase();
+    return reportsData.value.attendance_rows.filter((row) => {
+        const matchesDepartment = reportDepartment.value === 'all' || (row.department || 'Unassigned') === reportDepartment.value;
+        const matchesSearch = !query || [
+            row.employee_name, row.employee_code, row.department, row.status, row.date,
+        ].some((value) => String(value || '').toLowerCase().includes(query));
+        return matchesDepartment && matchesSearch;
+    });
+});
 const leaveData = ref({ requests: [], balances: [], types: [] });
 const selfServiceData = ref({
     employee: null, balances: [], leave_requests: [], leave_types: [], attendance: [], today_attendance: null,
@@ -153,6 +197,20 @@ const assetLossConfirmId = ref(null);
 const assetMaintenanceId = ref(null);
 const assetMaintenanceForm = ref({ condition: 'good', maintenance_note: '' });
 const assetMaintenanceError = ref('');
+const employeeDocumentsData = ref({
+    documents: [], employees: [], categories: [],
+    meta: { total: 0, expired: 0, expiring_soon: 0, current: 0, no_expiry: 0, limit: 300, truncated: false, can_manage: false },
+});
+const employeeDocumentsSearch = ref('');
+const employeeDocumentsFilter = ref('all');
+const employeeDocumentFormOpen = ref(false);
+const employeeDocumentForm = ref({ employee_id: '', category: 'identity', title: '', issued_on: '', expires_on: '', notes: '' });
+const employeeDocumentFile = ref(null);
+const employeeDocumentFormError = ref('');
+const employeeDocumentVersionId = ref(null);
+const employeeDocumentVersionForm = ref({ expires_on: '' });
+const employeeDocumentVersionFile = ref(null);
+const employeeDocumentVersionError = ref('');
 const selfServiceTab = ref('overview');
 const managerServiceTab = ref('overview');
 const selfServiceProfileForm = ref({ work_email: '', phone: '' });
@@ -387,10 +445,10 @@ const descriptions = {
     disciplinary: 'Restricted incident, investigation, hearing, and corrective-action records.',
     'health-safety': 'Restricted, company/branch-scoped incident, hazard, inspection, and PPE records with assigned manual follow-up and documented resolution.',
     'assets-uniforms': 'Track tagged equipment, uniforms, and PPE; route handovers for employee acknowledgement and record returns or loss.',
-    documents: 'Private employee records with controlled uploads, access, and expiry tracking.',
+    documents: 'Store private employee records, track expiry, and retain authorized downloads across versions.',
     'separation-settlement': 'Prepare offboarding-linked settlement workpapers with manual lines, completed clearances, and recorded review.',
-    reports: 'Permission-aware views and exports based on persisted domain data.',
-    settings: 'Company masters, leave and attendance rules, approval workflows, and access settings.',
+    reports: 'Filterable workforce, attendance, and leave analytics with role-scoped CSV exports.',
+    settings: 'Maintain company profile details and paid leave type policy metadata.',
     'workforce-planning': 'Manpower plans, positions, demand forecasts, and budget boundaries.',
     'labor-productivity': 'Configurable labor allocation and productivity measures for manufacturing operations.',
     'skills-competencies': 'Skills inventory, competency levels, role requirements, and gap analysis.',
@@ -421,10 +479,10 @@ const stagedScope = {
     disciplinary: 'Restricted, company/branch-scoped case intake, investigation, employee-response recording, and manual resolution tracking for HR/admin.',
     'health-safety': 'Restricted HR/admin intake, manually entered priority, scoped assignment, action tracking, and documented resolution. No medical details or automated risk/compliance assessments are recorded.',
     'assets-uniforms': 'Company/branch-scoped inventory, employee handover acknowledgement, returns, condition and loss notes, and assignment history are persisted. Fixed-asset accounting, purchasing, and ERP synchronization are not connected.',
-    documents: 'Private file access, upload validation, expiry alerts, and retention controls are staged.',
+    documents: 'Scoped private uploads, employee-owned downloads, auditable version history, and manual expiry flags are persisted. Notifications, retention schedules, and legal validation remain outside this foundation.',
     'separation-settlement': 'Settlement workpapers are linked to completed offboarding clearances. Earning and recovery lines are manually entered.',
-    reports: 'A persisted dashboard is available. Filterable exports and advanced analytics are staged.',
-    settings: 'Company context is seeded. Configurable policy and workflow editors are staged.',
+    reports: 'Workforce, attendance, and leave summaries are calculated from saved records within your access scope. Attendance exports include up to 500 records per selected range.',
+    settings: 'Company profile details and leave-type metadata can be maintained by HR/admin. Updating a leave type does not rewrite existing employee balances.',
     'workforce-planning': 'Position plans, demand assumptions, and budget controls are staged.',
     'labor-productivity': 'Manufacturing and timesheet integration contracts are staged.',
     'skills-competencies': 'Skill taxonomies, assessments, and gap analysis are staged.',
@@ -967,6 +1025,25 @@ async function loadShell() {
     }
 }
 
+async function refreshHrSettings() {
+    const result = await api('/settings');
+    hrSettingsData.value = result;
+    hrSettingsCompanyForm.value = {
+        name: result.company.name || '',
+        country: result.company.country || '',
+        currency: result.company.currency || '',
+    };
+    hrSettingsLeaveDrafts.value = Object.fromEntries(result.leave_types.map((type) => [
+        type.id,
+        {
+            name: type.name,
+            annual_entitlement: type.annual_entitlement,
+            is_paid: type.is_paid,
+            is_active: type.is_active,
+        },
+    ]));
+}
+
 async function loadActive() {
     if (!user.value) return;
     if (activeSlug.value === 'recruitment') {
@@ -976,6 +1053,12 @@ async function loadActive() {
     busy.value = true;
     try {
         if (activeSlug.value === 'dashboard') dashboard.value = await api('/dashboard');
+        if (activeSlug.value === 'reports') {
+            reportError.value = '';
+            const params = new URLSearchParams({ from: reportFrom.value, to: reportTo.value });
+            reportsData.value = await api(`/reports?${params.toString()}`);
+        }
+        if (activeSlug.value === 'settings' && canManageOrganization.value) await refreshHrSettings();
         if (activeSlug.value === 'employees') {
             const result = await api(`/employees${employeeSearch.value ? `?search=${encodeURIComponent(employeeSearch.value)}` : ''}`);
             employees.value = result.data;
@@ -1031,6 +1114,7 @@ async function loadActive() {
             }
         }
         if (activeSlug.value === 'assets-uniforms') assetUniformData.value = await api('/assets-uniforms');
+        if (activeSlug.value === 'documents') employeeDocumentsData.value = await api('/documents');
         if (activeSlug.value === 'shifts-rosters') {
             shiftRoster.value = await api(shiftRosterApiPath());
             if (!rosterAssignmentForm.value.employee_id && shiftRoster.value.employees.length) {
@@ -2434,6 +2518,106 @@ function editDepartment(department) {
     showDepartmentForm.value = true;
 }
 
+async function applyReportFilters() {
+    reportError.value = '';
+    if (!reportFrom.value || !reportTo.value || reportFrom.value > reportTo.value) {
+        reportError.value = 'Choose a valid date range with the start on or before the end.';
+        return;
+    }
+
+    busy.value = true;
+    try {
+        const params = new URLSearchParams({ from: reportFrom.value, to: reportTo.value });
+        reportsData.value = await api(`/reports?${params.toString()}`);
+    } catch (requestError) {
+        reportError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+function exportReports() {
+    reportsExporting.value = true;
+    try {
+        const rows = [
+            ['Date', 'Employee code', 'Employee', 'Department', 'Check in', 'Check out', 'Hours', 'Status'],
+            ...reportFilteredRows.value.map((row) => [
+                row.date, row.employee_code, row.employee_name, row.department,
+                row.check_in, row.check_out, row.hours, row.status,
+            ]),
+        ];
+        downloadCsv(rows, `northstar-attendance-report-${reportFrom.value}-to-${reportTo.value}.csv`);
+        message(`Exported ${reportFilteredRows.value.length} scoped attendance records.`);
+    } finally {
+        reportsExporting.value = false;
+    }
+}
+
+async function saveCompanySettings() {
+    hrSettingsCompanyError.value = '';
+    busy.value = true;
+    try {
+        const result = await api('/settings/company', {
+            method: 'PATCH',
+            body: JSON.stringify({
+                name: hrSettingsCompanyForm.value.name.trim(),
+                country: hrSettingsCompanyForm.value.country.trim().toUpperCase(),
+                currency: hrSettingsCompanyForm.value.currency.trim().toUpperCase(),
+            }),
+        });
+        hrSettingsData.value.company = { ...hrSettingsData.value.company, ...result.company };
+        user.value = { ...user.value, company: result.company };
+        message('Company profile updated.');
+    } catch (requestError) {
+        hrSettingsCompanyError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function createLeaveTypeSetting() {
+    hrSettingsLeaveError.value = '';
+    busy.value = true;
+    try {
+        await api('/settings/leave-types', {
+            method: 'POST',
+            body: JSON.stringify({
+                ...hrSettingsLeaveForm.value,
+                annual_entitlement: Number(hrSettingsLeaveForm.value.annual_entitlement),
+            }),
+        });
+        hrSettingsFormOpen.value = false;
+        hrSettingsLeaveForm.value = { name: '', annual_entitlement: 20, is_paid: true, is_active: true };
+        await refreshHrSettings();
+        message('Leave type added.');
+    } catch (requestError) {
+        hrSettingsLeaveError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function saveLeaveTypeSetting(leaveType) {
+    hrSettingsLeaveError.value = '';
+    busy.value = true;
+    try {
+        const draft = hrSettingsLeaveDrafts.value[leaveType.id];
+        await api(`/settings/leave-types/${leaveType.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+                ...draft,
+                annual_entitlement: Number(draft.annual_entitlement),
+            }),
+        });
+        await refreshHrSettings();
+        message(`${leaveType.name} policy updated. Existing employee balances are unchanged.`);
+    } catch (requestError) {
+        hrSettingsLeaveError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function saveDepartment() {
     busy.value = true;
     try {
@@ -3642,6 +3826,93 @@ async function submitAssetMaintenance(asset) {
     }
 }
 
+function documentCategoryLabel(category) {
+    return {
+        identity: 'Identity',
+        visa: 'Visa / work authorization',
+        contract: 'Contract',
+        qualification: 'Qualification',
+        certificate: 'Certificate',
+        other: 'Other',
+    }[category] || String(category || '').replaceAll('_', ' ');
+}
+
+function documentExpiryLabel(status) {
+    return {
+        expired: 'Expired',
+        expiring_soon: 'Expires within 30 days',
+        valid: 'Valid',
+        no_expiry: 'No expiry date',
+    }[status] || status;
+}
+
+function documentFileSize(bytes) {
+    const size = Number(bytes || 0);
+    return size >= 1024 * 1024
+        ? `${(size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(size / 1024))} KB`;
+}
+
+function openEmployeeDocumentVersion(document) {
+    employeeDocumentVersionId.value = document.id;
+    employeeDocumentVersionForm.value = {
+        expires_on: document.expires_on ? String(document.expires_on).slice(0, 10) : '',
+    };
+    employeeDocumentVersionFile.value = null;
+    employeeDocumentVersionError.value = '';
+}
+
+function closeEmployeeDocumentForm() {
+    employeeDocumentFormOpen.value = false;
+    employeeDocumentFile.value = null;
+    employeeDocumentFormError.value = '';
+}
+
+function closeEmployeeDocumentVersionForm() {
+    employeeDocumentVersionId.value = null;
+    employeeDocumentVersionFile.value = null;
+    employeeDocumentVersionError.value = '';
+}
+
+async function submitEmployeeDocument() {
+    employeeDocumentFormError.value = '';
+    busy.value = true;
+    try {
+        const payload = new FormData();
+        Object.entries(employeeDocumentForm.value).forEach(([key, value]) => payload.append(key, value));
+        if (employeeDocumentFile.value) payload.append('file', employeeDocumentFile.value);
+        await api('/documents', { method: 'POST', body: payload });
+        employeeDocumentForm.value = { employee_id: '', category: 'identity', title: '', issued_on: '', expires_on: '', notes: '' };
+        employeeDocumentFile.value = null;
+        employeeDocumentFormOpen.value = false;
+        message('Private employee document stored with an auditable first version.');
+        await loadActive();
+    } catch (requestError) {
+        employeeDocumentFormError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
+async function submitEmployeeDocumentVersion(document) {
+    employeeDocumentVersionError.value = '';
+    busy.value = true;
+    try {
+        const payload = new FormData();
+        Object.entries(employeeDocumentVersionForm.value).forEach(([key, value]) => payload.append(key, value));
+        if (employeeDocumentVersionFile.value) payload.append('file', employeeDocumentVersionFile.value);
+        await api(`/documents/${document.id}/versions`, { method: 'POST', body: payload });
+        employeeDocumentVersionId.value = null;
+        employeeDocumentVersionFile.value = null;
+        message('A new private document version was added; prior versions remain available to authorized users.');
+        await loadActive();
+    } catch (requestError) {
+        employeeDocumentVersionError.value = requestError.message;
+    } finally {
+        busy.value = false;
+    }
+}
+
 async function attendanceAction() {
     selfServiceAttendanceError.value = '';
     busy.value = true;
@@ -3993,7 +4264,8 @@ onUnmounted(() => {
                     </section>
                 </template>
 
-                <template v-else-if="activeSlug === 'organization'">
+                <template v-else-if="['organization', 'reports', 'settings'].includes(activeSlug)">
+                    <template v-if="activeSlug === 'organization'">
                     <section class="page-heading module-heading organization-heading">
                         <div>
                             <span class="eyebrow">PEOPLE <span class="dot-separator">•</span> ORGANIZATION INTELLIGENCE</span>
@@ -4016,8 +4288,9 @@ onUnmounted(() => {
                         </button>
                         <label class="table-search organization-search"><span>⌕</span><input v-model="organizationSearch" aria-label="Search organization" placeholder="Search teams or roles"></label>
                     </nav>
+                    </template>
 
-                    <template v-if="organizationTab === 'overview'">
+                    <template v-if="activeSlug === 'organization' && organizationTab === 'overview'">
                         <section class="organization-overview-grid">
                             <article class="panel organization-departments-panel">
                                 <div class="panel-heading"><div><span class="eyebrow">YOUR ORGANIZATION</span><h2>Teams at a glance</h2></div><button class="text-link" @click="organizationTab = 'departments'">Manage departments <span>→</span></button></div>
@@ -4054,7 +4327,7 @@ onUnmounted(() => {
                         </section>
                     </template>
 
-                    <template v-else-if="organizationTab === 'departments'">
+                    <template v-else-if="activeSlug === 'organization' && organizationTab === 'departments'">
                         <section class="panel directory-panel organization-directory">
                             <div class="directory-toolbar">
                                 <div><h2>Departments & teams</h2><span class="muted">{{ filteredDepartments.length }} of {{ organization.departments.length }} departments · structure, ownership, and cost center</span></div>
@@ -4084,7 +4357,7 @@ onUnmounted(() => {
                         </section>
                     </template>
 
-                    <template v-else-if="organizationTab === 'positions'">
+                    <template v-else-if="activeSlug === 'organization' && organizationTab === 'positions'">
                         <section class="organization-positions-intro"><div><span class="eyebrow">CAPACITY & HIRING PLAN</span><h2>Make room for the right people.</h2><p>Planned headcount stays separate from filled seats, so each opening is visible.</p></div><button v-if="canManageOrganization" class="button button-primary" @click="showPositionForm = !showPositionForm"><span>＋</span> Plan a position</button></section>
                         <form v-if="showPositionForm && canManageOrganization" class="panel organization-form organization-position-form" @submit.prevent="createPosition">
                             <div class="organization-form-heading"><div><span class="eyebrow">WORKFORCE PLAN</span><h3>Add a planned position</h3></div><button type="button" class="icon-button" aria-label="Close position form" @click="showPositionForm = false">×</button></div>
@@ -4118,6 +4391,91 @@ onUnmounted(() => {
 
 
 
+
+                    <template v-else-if="activeSlug === 'reports'">
+                        <section class="page-heading reports-heading">
+                            <div><span class="eyebrow">INSIGHTS <span class="dot-separator">•</span> REPORTS &amp; ANALYTICS</span><h1>See the work behind the numbers.</h1><p>Live workforce, attendance, and leave summaries, limited to records you are allowed to access.</p></div>
+                            <button class="button button-primary" :disabled="reportsExporting || !reportFilteredRows.length" @click="exportReports">{{ reportsExporting ? 'Preparing…' : '↓ Export attendance CSV' }}</button>
+                        </section>
+                        <form class="panel reports-filters" @submit.prevent="applyReportFilters">
+                            <label>From<input v-model="reportFrom" type="date" required></label>
+                            <label>To<input v-model="reportTo" type="date" required></label>
+                            <button class="button button-primary" :disabled="busy">{{ busy ? 'Updating…' : 'Update report' }}</button>
+                            <span class="reports-scope-note">Maximum range: 93 days</span>
+                        </form>
+                        <p v-if="reportError" class="inline-error reports-error" role="alert">{{ reportError }}</p>
+                        <section class="growth-metrics reports-metrics" aria-label="Workforce report summary">
+                            <article><span class="growth-metric-icon">♙</span><div><span class="eyebrow">PEOPLE IN SCOPE</span><b>{{ reportsData.metrics.employees }}</b><small>{{ reportsData.metrics.active_employees }} active</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-complete">＋</span><div><span class="eyebrow">NEW HIRES</span><b>{{ reportsData.metrics.new_hires }}</b><small>Within selected dates</small></div></article>
+                            <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">RECORDED HOURS</span><b>{{ Number(reportsData.metrics.hours_recorded).toLocaleString(undefined, { maximumFractionDigits: 1 }) }}</b><small>{{ reportsData.metrics.completed_shifts }} completed shifts</small></div></article>
+                            <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">PENDING LEAVE</span><b>{{ reportsData.metrics.pending_leave }}</b><small>{{ reportsData.meta.leave_total }} overlapping requests</small></div></article>
+                        </section>
+                        <section class="reports-grid">
+                            <article class="panel reports-panel reports-trend-panel">
+                                <div class="reports-panel-heading"><div><span class="eyebrow">ATTENDANCE ACTIVITY</span><h2>Daily recorded punches</h2><p>{{ formatDate(reportsData.meta.from) }} – {{ formatDate(reportsData.meta.to) }}</p></div><span class="reports-total">{{ reportsData.metrics.attendance_entries }} entries</span></div>
+                                <div v-if="reportsData.trend.some((day) => day.entries)" class="reports-trend">
+                                    <div v-for="day in reportsData.trend" :key="day.date" class="reports-trend-row"><span>{{ day.label }}</span><div class="reports-track"><i :style="{ width: `${Math.max(3, day.entries / Math.max(1, ...reportsData.trend.map((entry) => entry.entries)) * 100)}%` }"></i></div><b>{{ day.entries }}</b></div>
+                                </div>
+                                <div v-else class="reports-empty"><b>No attendance was recorded in this period.</b><p>Choose another date range to view recorded check-ins and completed shifts.</p></div>
+                            </article>
+                            <article class="panel reports-panel">
+                                <div class="reports-panel-heading"><div><span class="eyebrow">TEAM DISTRIBUTION</span><h2>People by department</h2><p>Active and inactive employees in your access scope.</p></div></div>
+                                <div v-if="reportsData.departments.length" class="reports-departments">
+                                    <div v-for="department in reportsData.departments" :key="department.name" class="reports-department"><div><span>{{ department.name }}</span><b>{{ department.count }}</b></div><span class="reports-track"><i :style="{ width: `${Math.max(4, department.count / reportMaxDepartmentCount * 100)}%` }"></i></span></div>
+                                </div>
+                                <div v-else class="reports-empty"><b>No employee data is available.</b><p>Employee records in your scope will appear here.</p></div>
+                                <div class="reports-leave-summary"><span class="eyebrow">LEAVE REQUESTS IN RANGE</span><div><span v-for="item in reportsData.leave_status" :key="item.status" class="reports-leave-item"><b>{{ item.count }}</b><small>{{ item.status.replace('_', ' ') }}</small></span></div></div>
+                            </article>
+                        </section>
+                        <section class="panel reports-table-panel">
+                            <div class="reports-table-heading"><div><span class="eyebrow">SOURCE RECORDS</span><h2>Attendance detail</h2><p>Saved time records only; missing punches are not interpreted as absences.</p></div><div class="reports-table-actions"><label>Department<select v-model="reportDepartment"><option value="all">All departments</option><option v-for="department in reportsData.departments" :key="department.name" :value="department.name">{{ department.name }}</option></select></label><label class="table-search reports-search"><span>⌕</span><input v-model="reportSearch" aria-label="Search attendance report" placeholder="Search employee or code"></label></div></div>
+                            <div v-if="reportsData.meta.attendance_truncated" class="expense-truncation-note">The report contains more than {{ reportsData.meta.attendance_limit }} records. This view and export include the most recent {{ reportsData.meta.attendance_limit }}.</div>
+                            <div class="table-scroll"><table class="data-table reports-table"><thead><tr><th>Date</th><th>Employee</th><th>Department</th><th>Check in</th><th>Check out</th><th>Hours</th><th>Status</th></tr></thead><tbody><tr v-for="row in reportFilteredRows" :key="`${row.date}-${row.employee_code}-${row.check_in}`"><td>{{ formatDate(row.date) }}</td><td><b>{{ row.employee_name || '—' }}</b><small>{{ row.employee_code || '' }}</small></td><td>{{ row.department || 'Unassigned' }}</td><td>{{ row.check_in?.slice(11, 16) || '—' }}</td><td>{{ row.check_out?.slice(11, 16) || '—' }}</td><td>{{ row.hours ?? '—' }}</td><td><span class="status-pill" :class="row.status === 'completed' ? 'status-foundation' : 'status-planned'">{{ row.status }}</span></td></tr></tbody></table></div>
+                            <div v-if="!reportFilteredRows.length" class="reports-empty reports-table-empty"><b>No report rows match these filters.</b><p>Adjust your dates, department, or employee search.</p><button class="button button-soft" @click="reportDepartment = 'all'; reportSearch = ''">Clear table filters</button></div>
+                        </section>
+                        <p class="expense-boundary-note"><span>ⓘ</span> Reports summarize saved workflow data only. Hours use recorded punch times; this is not a payroll, compliance, or absence calculation.</p>
+                    </template>
+
+                    <template v-else-if="activeSlug === 'settings'">
+                        <template v-if="canManageOrganization">
+                            <section class="page-heading settings-heading"><div><span class="eyebrow">ADMINISTRATION <span class="dot-separator">•</span> HR SETTINGS</span><h1>Set the rules your workflows use.</h1><p>Manage your organization profile and leave type metadata. Changes are audited.</p></div><span class="status-pill status-foundation">HR &amp; admin</span></section>
+                            <section class="settings-grid">
+                                <article class="panel settings-panel settings-company-panel">
+                                    <div class="settings-panel-heading"><span class="settings-panel-icon">⌂</span><div><span class="eyebrow">ORGANIZATION PROFILE</span><h2>Company details</h2><p>These details are shown in your workspace and used as currency context.</p></div></div>
+                                    <form class="settings-form" @submit.prevent="saveCompanySettings">
+                                        <label>Company name<input v-model.trim="hrSettingsCompanyForm.name" maxlength="120" required></label>
+                                        <div class="settings-field-pair"><label>Country code<input v-model.trim="hrSettingsCompanyForm.country" maxlength="2" minlength="2" required placeholder="AE"></label><label>Currency code<input v-model.trim="hrSettingsCompanyForm.currency" maxlength="3" minlength="3" required placeholder="AED"></label></div>
+                                        <p v-if="hrSettingsCompanyError" class="inline-error" role="alert">{{ hrSettingsCompanyError }}</p>
+                                        <button class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save company details' }}</button>
+                                    </form>
+                                    <div class="settings-branch-list"><span class="eyebrow">REGISTERED BRANCHES</span><div v-for="branch in hrSettingsData.company.branches || []" :key="branch.id"><b>{{ branch.name }}</b><small>{{ branch.code }}<template v-if="branch.city"> · {{ branch.city }}</template></small></div><p v-if="!hrSettingsData.company.branches?.length" class="muted">No branches have been configured.</p></div>
+                                </article>
+                                <article class="panel settings-panel settings-leave-panel">
+                                    <div class="settings-panel-heading"><span class="settings-panel-icon">◷</span><div><span class="eyebrow">TIME &amp; ABSENCE</span><h2>Leave types</h2><p>Set annual entitlement and whether each type is paid. Existing employee balances are never rewritten here.</p></div><button class="button button-soft" @click="hrSettingsFormOpen = !hrSettingsFormOpen">{{ hrSettingsFormOpen ? 'Close' : '＋ Add type' }}</button></div>
+                                    <form v-if="hrSettingsFormOpen" class="settings-new-leave" @submit.prevent="createLeaveTypeSetting">
+                                        <label>Type name<input v-model.trim="hrSettingsLeaveForm.name" maxlength="100" required placeholder="e.g. Compassionate leave"></label>
+                                        <div class="settings-field-pair"><label>Annual days<input v-model.number="hrSettingsLeaveForm.annual_entitlement" type="number" min="0" max="366" step="0.5" required></label><label class="settings-checkbox"><input v-model="hrSettingsLeaveForm.is_paid" type="checkbox"> Paid leave</label></div>
+                                        <label class="settings-checkbox"><input v-model="hrSettingsLeaveForm.is_active" type="checkbox"> Available for new requests</label>
+                                        <p v-if="hrSettingsLeaveError" class="inline-error" role="alert">{{ hrSettingsLeaveError }}</p>
+                                        <button class="button button-primary" :disabled="busy">{{ busy ? 'Saving…' : 'Create leave type' }}</button>
+                                    </form>
+                                    <div v-if="hrSettingsData.leave_types.length" class="settings-leave-list">
+                                        <form v-for="leaveType in hrSettingsData.leave_types" :key="leaveType.id" class="settings-leave-row" @submit.prevent="saveLeaveTypeSetting(leaveType)">
+                                            <label>Leave type<input v-model.trim="hrSettingsLeaveDrafts[leaveType.id].name" maxlength="100" required></label>
+                                            <label>Annual days<input v-model.number="hrSettingsLeaveDrafts[leaveType.id].annual_entitlement" type="number" min="0" max="366" step="0.5" required></label>
+                                            <label class="settings-checkbox"><input v-model="hrSettingsLeaveDrafts[leaveType.id].is_paid" type="checkbox"> Paid</label>
+                                            <label class="settings-checkbox"><input v-model="hrSettingsLeaveDrafts[leaveType.id].is_active" type="checkbox"> Active</label>
+                                            <button class="button button-soft" :disabled="busy">{{ busy ? 'Saving…' : 'Save' }}</button>
+                                        </form>
+                                    </div>
+                                    <div v-else class="reports-empty"><b>No leave types configured.</b><p>Add a leave type to make it available in the request workflow.</p><button class="button button-primary" @click="hrSettingsFormOpen = true">Add your first leave type</button></div>
+                                    <p v-if="hrSettingsLeaveError && !hrSettingsFormOpen" class="inline-error settings-inline-error" role="alert">{{ hrSettingsLeaveError }}</p>
+                                    <p class="settings-policy-note"><span>ⓘ</span> Updating a policy does not alter existing yearly balances or calculate local statutory entitlement. Validate policy changes with your HR/legal team.</p>
+                                </article>
+                            </section>
+                        </template>
+                        <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>HR settings are restricted</b><p>Company details and leave policies can be managed by HR and administrators. Employees and managers can still use their available workspaces.</p><button class="button button-primary" @click="navigate('dashboard')">Return to dashboard</button></section>
+                    </template>
 
                     <template v-else>
                         <section class="panel reporting-panel">
@@ -5528,6 +5886,73 @@ onUnmounted(() => {
                         <p class="expense-boundary-note"><span>ⓘ</span> Acknowledgement confirms receipt only. This page does not calculate deductions, replacement costs, or ownership.</p>
                     </template>
                     <section v-else class="panel payroll-restricted"><span class="empty-icon">♙</span><b>Restricted asset workspace</b><p>Inventory administration is limited to HR and administrators. Employees can acknowledge only their own active handovers.</p></section>
+                </template>
+
+                <template v-else-if="activeSlug === 'documents'">
+                    <section class="page-heading documents-heading">
+                        <div><span class="eyebrow">WORKPLACE <span class="dot-separator">•</span> DOCUMENT MANAGEMENT</span><h1>{{ employeeDocumentsData.meta.can_manage ? 'Important records, in order.' : 'Your documents, in one place.' }}</h1><p>{{ employeeDocumentsData.meta.can_manage ? 'Keep private employee files organized, versioned, and easy to review before expiry.' : 'Access the employee documents HR has shared with you, including older versions.' }}</p></div>
+                        <button v-if="employeeDocumentsData.meta.can_manage" class="button button-primary" @click="employeeDocumentFormOpen ? closeEmployeeDocumentForm() : employeeDocumentFormOpen = true">{{ employeeDocumentFormOpen ? 'Close upload form' : '＋ Add employee document' }}</button>
+                    </section>
+                    <section class="growth-metrics documents-metrics" aria-label="Document expiry summary">
+                        <article><span class="growth-metric-icon">▤</span><div><span class="eyebrow">DOCUMENTS IN SCOPE</span><b>{{ employeeDocumentsData.meta.total }}</b><small>{{ employeeDocumentsData.meta.can_manage ? 'Company or branch scope' : 'Private to your profile' }}</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-complete">↗</span><div><span class="eyebrow">CURRENT</span><b>{{ employeeDocumentsData.meta.current }}</b><small>Expiry is more than 30 days away</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-review">◷</span><div><span class="eyebrow">EXPIRING SOON</span><b>{{ employeeDocumentsData.meta.expiring_soon }}</b><small>Expires within 30 days</small></div></article>
+                        <article><span class="growth-metric-icon growth-metric-overdue">!</span><div><span class="eyebrow">EXPIRED</span><b>{{ employeeDocumentsData.meta.expired }}</b><small>Review the saved expiry date</small></div></article>
+                    </section>
+                    <section class="panel documents-workspace">
+                        <section v-if="employeeDocumentFormOpen && employeeDocumentsData.meta.can_manage" class="growth-form documents-form">
+                            <div class="growth-form-heading"><div><span class="eyebrow">PRIVATE EMPLOYEE FILE</span><h2>Add a document.</h2><p>Upload an approved PDF or image. Files are stored privately and downloaded only through an authorized route.</p></div><button type="button" class="icon-button" aria-label="Close document upload form" @click="closeEmployeeDocumentForm">×</button></div>
+                            <form class="growth-form-grid" @submit.prevent="submitEmployeeDocument">
+                                <label>Employee<select v-model="employeeDocumentForm.employee_id" required><option value="">Select an employee</option><option v-for="employee in employeeDocumentsData.employees" :key="employee.id" :value="String(employee.id)">{{ employee.first_name }} {{ employee.last_name }} · {{ employee.employee_code }}<template v-if="employee.status !== 'active'"> · {{ employee.status }}</template></option></select></label>
+                                <label>Document category<select v-model="employeeDocumentForm.category" required><option v-for="category in employeeDocumentsData.categories" :key="category" :value="category">{{ documentCategoryLabel(category) }}</option></select></label>
+                                <label class="growth-field-wide">Document title<input v-model.trim="employeeDocumentForm.title" maxlength="180" required placeholder="e.g. Employment agreement"></label>
+                                <label>Issue date <span class="documents-optional">(optional)</span><input v-model="employeeDocumentForm.issued_on" type="date"></label>
+                                <label>Expiry date <span class="documents-optional">(optional)</span><input v-model="employeeDocumentForm.expires_on" type="date" :min="employeeDocumentForm.issued_on || undefined"></label>
+                                <label class="growth-field-wide">HR note <span class="documents-optional">(optional)</span><textarea v-model.trim="employeeDocumentForm.notes" rows="2" maxlength="2000" placeholder="Add a short handling or renewal note"></textarea></label>
+                                <label class="growth-field-wide">File <input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required @change="employeeDocumentFile = $event.target.files?.[0] || null"><small>PDF, JPEG, or PNG · up to 10 MB. Do not upload medical records or unrelated sensitive content.</small></label>
+                                <div v-if="employeeDocumentFormError" class="inline-error growth-field-wide" role="alert">{{ employeeDocumentFormError }}</div>
+                                <div class="growth-form-footer growth-field-wide"><span>HR and administrators can access files in scope; employees can access only their own documents. Review applicable retention and privacy policies.</span><div><button type="button" class="button button-soft" @click="closeEmployeeDocumentForm">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || !employeeDocumentFile">{{ busy ? 'Uploading…' : 'Store private document' }}</button></div></div>
+                            </form>
+                        </section>
+                        <div class="documents-toolbar">
+                            <nav class="growth-tabs" aria-label="Document expiry views">
+                                <button :class="{ active: employeeDocumentsFilter === 'all' }" @click="employeeDocumentsFilter = 'all'">All <span>{{ employeeDocumentsData.meta.total }}</span></button>
+                                <button :class="{ active: employeeDocumentsFilter === 'expired' }" @click="employeeDocumentsFilter = 'expired'">Expired <span>{{ employeeDocumentsData.meta.expired }}</span></button>
+                                <button :class="{ active: employeeDocumentsFilter === 'expiring_soon' }" @click="employeeDocumentsFilter = 'expiring_soon'">Expiring soon <span>{{ employeeDocumentsData.meta.expiring_soon }}</span></button>
+                                <button :class="{ active: employeeDocumentsFilter === 'valid' }" @click="employeeDocumentsFilter = 'valid'">Current</button>
+                                <button :class="{ active: employeeDocumentsFilter === 'no_expiry' }" @click="employeeDocumentsFilter = 'no_expiry'">No expiry</button>
+                            </nav>
+                            <label class="table-search growth-search"><span>⌕</span><input v-model="employeeDocumentsSearch" aria-label="Search employee documents" placeholder="Search title, employee, category"></label>
+                        </div>
+                        <div v-if="employeeDocumentsData.meta.truncated" class="expense-truncation-note">Showing the latest {{ employeeDocumentsData.meta.limit }} documents in your access scope.</div>
+                        <div v-if="filteredEmployeeDocuments.length" class="documents-list">
+                            <article v-for="document in filteredEmployeeDocuments" :key="document.id" class="documents-card">
+                                <div class="documents-card-header">
+                                    <div><span class="eyebrow">{{ documentCategoryLabel(document.category).toUpperCase() }} <span class="dot-separator">•</span> {{ document.employee?.employee_code || 'MY DOCUMENT' }}</span><h2>{{ document.title }}</h2><p v-if="document.employee">{{ document.employee.first_name }} {{ document.employee.last_name }}<template v-if="document.employee.department"> · {{ document.employee.department }}</template></p><p v-else-if="document.versions[0]">Latest version uploaded {{ formatDate(document.versions[0].created_at) }}</p></div>
+                                    <span class="documents-expiry-pill" :class="`documents-expiry-${document.expiry_status}`">{{ documentExpiryLabel(document.expiry_status) }}</span>
+                                </div>
+                                <div class="documents-meta"><span v-if="document.issued_on">Issued <b>{{ formatDate(document.issued_on) }}</b></span><span v-if="document.expires_on">Expires <b>{{ formatDate(document.expires_on) }}</b></span><span v-if="document.notes">HR note <b>{{ document.notes }}</b></span><span v-if="document.creator">Added by <b>{{ document.creator.name }}</b></span></div>
+                                <section class="documents-versions" aria-label="Document versions">
+                                    <div v-for="version in document.versions" :key="version.id" class="documents-version-row">
+                                        <span class="documents-version-icon">▧</span><span class="documents-version-info"><b>Version {{ version.version_number }} · {{ version.original_name }}</b><small>{{ documentFileSize(version.file_size) }} · {{ formatDate(version.created_at) }}<template v-if="version.uploader"> · {{ version.uploader.name }}</template></small></span><a class="button button-soft documents-download" :href="version.download_url" :download="version.original_name">Download</a>
+                                    </div>
+                                    <p v-if="document.version_history_truncated" class="documents-history-note">Showing the 20 most recent versions. Earlier files remain stored but are not listed in this view.</p>
+                                </section>
+                                <button v-if="employeeDocumentsData.meta.can_manage" class="text-link documents-add-version" @click="openEmployeeDocumentVersion(document)">＋ Add a new version</button>
+                                <form v-if="employeeDocumentVersionId === document.id" class="documents-version-form" @submit.prevent="submitEmployeeDocumentVersion(document)">
+                                    <div class="documents-version-form-heading"><span class="eyebrow">NEW VERSION</span><span>Previous versions are retained.</span></div>
+                                    <div class="growth-form-grid">
+                                        <label>Expiry date <span class="documents-optional">(leave blank for no expiry)</span><input v-model="employeeDocumentVersionForm.expires_on" type="date" :min="document.issued_on || undefined"></label>
+                                        <label class="growth-field-wide">Replacement file<input type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required @change="employeeDocumentVersionFile = $event.target.files?.[0] || null"></label>
+                                        <div v-if="employeeDocumentVersionError" class="inline-error growth-field-wide" role="alert">{{ employeeDocumentVersionError }}</div>
+                                        <div class="growth-form-footer growth-field-wide"><span>Title, category, and issue date stay unchanged; the latest expiry date applies to this document.</span><div><button type="button" class="button button-soft" @click="closeEmployeeDocumentVersionForm">Cancel</button><button type="submit" class="button button-primary" :disabled="busy || !employeeDocumentVersionFile">{{ busy ? 'Uploading…' : 'Save new version' }}</button></div></div>
+                                    </div>
+                                </form>
+                            </article>
+                        </div>
+                        <div v-else class="expense-empty-state"><span class="empty-icon">▤</span><b>{{ employeeDocumentsSearch || employeeDocumentsFilter !== 'all' ? 'No documents match these filters.' : employeeDocumentsData.meta.can_manage ? 'Your private document register is ready.' : 'No documents are available yet.' }}</b><p>{{ employeeDocumentsSearch || employeeDocumentsFilter !== 'all' ? 'Try another title, employee, category, or expiry filter.' : employeeDocumentsData.meta.can_manage ? 'Add a document to begin tracking employee records and expiry dates.' : 'When HR adds a document to your employee record, it will appear here.' }}</p><button v-if="employeeDocumentsData.meta.can_manage && !employeeDocumentsSearch && employeeDocumentsFilter === 'all' && !employeeDocumentFormOpen" class="button button-primary" @click="employeeDocumentFormOpen = true">Add first document</button><button v-else-if="employeeDocumentsSearch || employeeDocumentsFilter !== 'all'" class="button button-soft" @click="employeeDocumentsSearch = ''; employeeDocumentsFilter = 'all'">Clear filters</button></div>
+                    </section>
+                    <p class="expense-boundary-note"><span>ⓘ</span> Private files are served as downloads, not public links or inline previews. Expiry labels reflect dates entered by HR; this tracker does not certify legal validity, retention compliance, or renewal completion.</p>
                 </template>
 
                 <template v-else>
